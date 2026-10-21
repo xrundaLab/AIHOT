@@ -6,8 +6,8 @@
 @source "../../../modules/*/{web.tsx,web/**}";
 
 /* ---------------------------------------------------------------------------
-   Design tokens: warm off-white paper, ink text, one teal accent (cyan in
-   dark), hairline borders, no gradients.
+   Design tokens: RunS ultraviolet, lime highlights, neutral surfaces, and
+   semantic state colours. Values change per theme only.
    Components use the semantic names below; values change per theme only.
    --------------------------------------------------------------------------- */
 
@@ -45,6 +45,8 @@
   --color-accent-soft: var(--accent-soft);
   --color-accent-softer: var(--accent-softer);
   --color-accent-contrast: var(--accent-contrast);
+  --color-brand-purple: var(--brand-purple);
+  --color-brand-lime: var(--brand-lime);
   --color-note: var(--note);
   --color-hot: var(--hot);
   --color-hot-soft: var(--hot-soft);
@@ -92,55 +94,57 @@
   --gutter-l: max(16px, env(safe-area-inset-left));
   --gutter-r: max(16px, env(safe-area-inset-right));
   color-scheme: light;
-  --bg: #faf9f6;
-  --bg-sunk: #f3f3ef;
-  --bg-muted: #e9ede9;
+  --brand-purple: #9260fe;
+  --brand-lime: #d4fb79;
+  --bg: #faf9fc;
+  --bg-sunk: #f3ecf7;
+  --bg-muted: #f8f2f6;
   /* Sunk fills: wells, pill tracks, search fields, quiet badges. */
   --well: var(--bg-sunk);
   --surface: #ffffff;
-  --surface-2: #fdfdfb;
+  --surface-2: #faf9fc;
   --raised: #ffffff;
-  --sidebar: #fdfdfb;
-  --daybar: #f0f2ee;
-  --ink: #202a30;
-  --ink-2: #303c42;
-  --ink-3: #59656b;
-  --ink-4: #657176;
-  --line: #dfe4e1;
-  --line-strong: #d1d9d5;
-  --line-soft: #e9ede9;
-  --accent: #176b75;
-  --accent-ink: #145f68;
-  --accent-soft: rgba(23, 107, 117, 0.08);
-  --accent-softer: rgba(23, 107, 117, 0.05);
+  --sidebar: #faf9fc;
+  --daybar: #f8f2f6;
+  --ink: #1e1e1e;
+  --ink-2: #4e4759;
+  --ink-3: #747079;
+  --ink-4: #8a8394;
+  --line: #e9e5ee;
+  --line-strong: #d7c4fa;
+  --line-soft: #f3ecf7;
+  --accent: var(--brand-purple);
+  --accent-ink: #6956a8;
+  --accent-soft: #f3ecf7;
+  --accent-softer: #f8f2f6;
   --accent-contrast: #ffffff;
-  --note: #526f72;
-  --hot: #b3402a;
-  --hot-soft: rgba(179, 64, 42, 0.08);
-  --amber: #b8873a;
-  --amber-ink: #7c5a24;
-  --amber-soft: rgba(184, 135, 58, 0.1);
-  --ok: #2f7d5c;
-  --ok-soft: rgba(47, 125, 92, 0.1);
-  --ok-ink: #2a6e51;
-  --rank-1: #b3402a;
-  --rank-2: #a3642f;
-  --rank-3: #96702e;
-  --rank-rest: #6b7684;
-  --shadow-card: 0 1px 2px rgba(32, 42, 48, 0.025);
-  --shadow-card-hover: 0 3px 12px rgba(32, 42, 48, 0.055);
-  --shadow-soft: 0 4px 12px rgba(28, 39, 51, 0.06);
-  --shadow-thumb: 0 1px 2px rgba(28, 39, 51, 0.1), 0 1px 1px rgba(28, 39, 51, 0.04);
-  --shadow-pop: 0 12px 32px rgba(28, 39, 51, 0.12);
-  --prose-ink: #26323a;
-  --code-bg: #f6f7f4;
-  --code-keyword: #006d77;
-  --code-string: #2f6f44;
-  --code-number: #9a6700;
-  --code-title: #6f42c1;
-  --code-variable: #a13d10;
-  --code-meta: #b42348;
-  --selection: rgba(23, 107, 117, 0.16);
+  --note: #8d75e6;
+  --hot: #d8455a;
+  --hot-soft: rgba(216, 69, 90, 0.1);
+  --amber: #e16521;
+  --amber-ink: #e16521;
+  --amber-soft: rgba(225, 101, 33, 0.1);
+  --ok: #25a871;
+  --ok-soft: var(--brand-lime);
+  --ok-ink: #2e3d0b;
+  --rank-1: #d8455a;
+  --rank-2: #e16521;
+  --rank-3: #9260fe;
+  --rank-rest: #747079;
+  --shadow-card: none;
+  --shadow-card-hover: 0 2px 8px rgb(30 30 30 / 6%);
+  --shadow-soft: 0 4px 12px rgb(30 30 30 / 6%), 0 12px 32px -4px rgb(30 30 30 / 8%);
+  --shadow-thumb: 0 2px 8px rgb(30 30 30 / 6%);
+  --shadow-pop: 0 2px 4px rgb(30 30 30 / 4%), 0 12px 28px -4px rgb(30 30 30 / 8%), 0 32px 64px -16px rgb(107 71 199 / 14%);
+  --prose-ink: #1e1e1e;
+  --code-bg: #f3ecf7;
+  --code-keyword: #6956a8;
+  --code-string: #25a871;
+  --code-number: #e16521;
+  --code-title: #32274b;
+  --code-variable: #d8455a;
+  --code-meta: #8d75e6;
+  --selection: rgba(146, 96, 254, 0.18);
 }
 
 @media (min-width: 961px) {
@@ -151,54 +155,56 @@
 
 [data-theme="dark"] {
   color-scheme: dark;
-  --bg: #13191c;
-  --bg-sunk: #182024;
-  --bg-muted: #202a2f;
-  --well: color-mix(in oklab, var(--bg-muted) 60%, transparent);
-  --surface: #1a2226;
-  --surface-2: #1d272b;
-  --raised: #202a2f;
-  --sidebar: #161e21;
-  --daybar: #182024;
-  --ink: #e7eceb;
-  --ink-2: #d2dada;
-  --ink-3: #a5b0b3;
-  --ink-4: #89979d;
-  --line: rgba(255, 255, 255, 0.08);
-  --line-strong: rgba(255, 255, 255, 0.12);
-  --line-soft: rgba(255, 255, 255, 0.06);
-  --accent: #12ccd8;
-  --accent-ink: #2ce2e8;
-  --accent-soft: rgba(18, 204, 216, 0.12);
-  --accent-softer: rgba(18, 204, 216, 0.06);
-  --accent-contrast: #000000;
-  --note: #8fb8a8;
-  --hot: #d86a52;
-  --hot-soft: rgba(216, 106, 82, 0.12);
-  --amber: #d3b26a;
-  --amber-ink: #d3b26a;
-  --amber-soft: rgba(211, 178, 106, 0.12);
-  --ok: #5fc79a;
-  --ok-soft: rgba(95, 199, 154, 0.12);
-  --ok-ink: #7fd1ad;
-  --rank-1: #d86a52;
-  --rank-2: #d18a5e;
-  --rank-3: #d3b26a;
-  --rank-rest: #7b869a;
+  --brand-purple: #a990f5;
+  --brand-lime: #d4fb79;
+  --bg: #1e1e1e;
+  --bg-sunk: #26232b;
+  --bg-muted: #32274b;
+  --well: #26232b;
+  --surface: #26232b;
+  --surface-2: #26232b;
+  --raised: #32274b;
+  --sidebar: #1e1e1e;
+  --daybar: #26232b;
+  --ink: #f5f2fa;
+  --ink-2: #f5f2fa;
+  --ink-3: #a9a2b4;
+  --ink-4: #a9a2b4;
+  --line: #38333f;
+  --line-strong: #38333f;
+  --line-soft: #38333f;
+  --accent: var(--brand-purple);
+  --accent-ink: #a990f5;
+  --accent-soft: #32274b;
+  --accent-softer: #26232b;
+  --accent-contrast: #1e1e1e;
+  --note: #a990f5;
+  --hot: #d8455a;
+  --hot-soft: rgba(216, 69, 90, 0.16);
+  --amber: #e16521;
+  --amber-ink: #e16521;
+  --amber-soft: rgba(225, 101, 33, 0.16);
+  --ok: #25a871;
+  --ok-soft: var(--brand-lime);
+  --ok-ink: #2e3d0b;
+  --rank-1: #d8455a;
+  --rank-2: #e16521;
+  --rank-3: #a990f5;
+  --rank-rest: #a9a2b4;
   --shadow-card: none;
   --shadow-card-hover: none;
-  --shadow-soft: 0 6px 18px rgba(0, 0, 0, 0.35);
-  --shadow-thumb: 0 1px 2px rgba(0, 0, 0, 0.45);
-  --shadow-pop: 0 16px 40px rgba(0, 0, 0, 0.45);
-  --prose-ink: #d7dfdf;
-  --code-bg: #10151c;
-  --code-keyword: #78dce8;
-  --code-string: #a9dc76;
-  --code-number: #ffd866;
-  --code-title: #ab9df2;
-  --code-variable: #fc9867;
-  --code-meta: #ff6188;
-  --selection: rgba(18, 204, 216, 0.22);
+  --shadow-soft: none;
+  --shadow-thumb: none;
+  --shadow-pop: none;
+  --prose-ink: #f5f2fa;
+  --code-bg: #26232b;
+  --code-keyword: #a990f5;
+  --code-string: #d4fb79;
+  --code-number: #e16521;
+  --code-title: #f5f2fa;
+  --code-variable: #d8455a;
+  --code-meta: #a990f5;
+  --selection: rgba(169, 144, 245, 0.22);
 }
 
 @layer base {
@@ -261,7 +267,7 @@
     transition: color 120ms, background-color 120ms, border-color 120ms;
   }
   a.chip:hover {
-    color: var(--accent);
+    color: var(--accent-ink);
     border-color: var(--line-strong);
   }
   .skeleton {
@@ -466,7 +472,7 @@
 .prose h4, .prose h5 { font-size: 1em; margin-top: 1.5em; }
 .prose :is(h2, h3, h4, h5) + * { margin-top: 0.7em; }
 .prose a {
-  color: var(--accent);
+  color: var(--accent-ink);
   text-decoration: underline;
   text-decoration-color: color-mix(in srgb, var(--accent) 35%, transparent);
   text-underline-offset: 3px;
@@ -575,4 +581,16 @@
    the archive column is halfway between the site sidebar and white. */
 :root:not([data-theme="dark"]) body:has(.report-shell) {
   background: color-mix(in srgb, var(--bg) 60%, var(--surface));
+}
+
+/* Small accent labels and links use the accessible text shade; fills and decorative marks keep the
+   brighter brand purple. */
+.text-accent:not(.text-accent-contrast),
+.hover\:text-accent:hover:not(.text-accent-contrast),
+.group-hover\:text-accent:is(:where(.group):hover *) {
+  color: var(--accent-ink);
+}
+
+.bg-ok-soft.text-ok {
+  color: var(--ok-ink);
 }
