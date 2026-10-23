@@ -187,7 +187,7 @@ export async function computeHotRanking(at = new Date()): Promise<{ id: number; 
 
   const entries: HotEntry[] = [];
   for (const r of rows) {
-    if (entries.length >= 10) break;
+    if (entries.length >= 100) break;
     const reports = await sql<Array<RepresentativeIdentity & { id: string; url: string; title: string; source_id: string; source_name: string; selected: boolean; score: number | null; at: Date; timeline_at: Date; body_mode: "full" | "summary"; fact_id: number }>>`
       SELECT DISTINCT ON (p.article_id) p.article_id AS id, p.url, p.title, s.id AS source_id, s.name AS source_name, p.selected, p.score, p.timeline_at, p.body_mode,
              f.id AS fact_id, ${REPRESENTATIVE_COLUMNS}, coalesce(p.published_at, p.discovered_at) AS at

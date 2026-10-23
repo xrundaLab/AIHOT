@@ -87,7 +87,7 @@ const SEARCH_INPUT = z.strictObject({
   limit: z.number().int().min(1).max(30).default(10).describe("Maximum number of results, from 1 to 30."),
 });
 const HOT_INPUT = z.strictObject({
-  limit: z.number().int().min(1).max(10).default(10).describe("Maximum number of current topics, from 1 to 10."),
+  limit: z.number().int().min(1).max(100).default(100).describe("Maximum number of current topics, from 1 to 100."),
 });
 const STORY_INPUT = z.strictObject({
   public_id: z.string().min(1).max(128).describe(`Opaque story public ID. Obtain it from the final path segment of ${T.hot} links.story; never guess it.`),
@@ -160,7 +160,7 @@ function registerTools(server: McpServer, say: typeof ok) {
   server.registerTool(
     T.hot,
     {
-      description: `Get the current ${SITE.name} Top 10 with each event's one-based rank. Use this for 'what is hot now' and to discover valid story public IDs; use ${T.latest} for a chronological news list. Internal heat scores are not returned.`,
+      description: `Get the current ${SITE.name} Top 100 with each event's one-based rank. Use this for 'what is hot now' and to discover valid story public IDs; use ${T.latest} for a chronological news list. Internal heat scores are not returned.`,
       inputSchema: HOT_INPUT,
       annotations: ANNOTATIONS,
     },

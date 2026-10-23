@@ -254,7 +254,7 @@
       "get": {
         "operationId": "hotTopics",
         "summary": "List current multi-source hot topics",
-        "description": "The current {{siteName}} Top 10, ranked by multi-source coverage and discussion heat. Each item includes a one-based rank; internal and display heat values are not returned. Uses the latest successfully published ranking, normally refreshed every five minutes. Shared caches use a 60s freshness window; poll no faster than s-maxage and use If-None-Match. If an item includes links.story, it is a human-facing HTML URL: extract its final publicId path segment and call /api/v1/stories/{publicId} for timeline JSON. Never request links.story as an API. When absent, do not construct a story id.",
+        "description": "The current {{siteName}} Top 100, ranked by multi-source coverage and discussion heat. Each item includes a one-based rank; internal and display heat values are not returned. Uses the latest successfully published ranking, normally refreshed every five minutes. Shared caches use a 60s freshness window; poll no faster than s-maxage and use If-None-Match. If an item includes links.story, it is a human-facing HTML URL: extract its final publicId path segment and call /api/v1/stories/{publicId} for timeline JSON. Never request links.story as an API. When absent, do not construct a story id.",
         "responses": {
           "200": {
             "description": "OK",
@@ -2790,7 +2790,7 @@
       "get": {
         "operationId": "agentHot",
         "summary": "Current hot topics as an agent answer",
-        "description": "The current Top 10 by rank, each with the address of its story answer. No heat values.",
+        "description": "The current Top 100 by rank, each with the address of its story answer. No heat values.",
         "parameters": [
           {
             "$ref": "#/components/parameters/ActorUserAgent"
@@ -3709,8 +3709,8 @@
           "rank": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 10,
-            "description": "One-based position in the current {{siteName}} Top 10 response."
+            "maximum": 100,
+            "description": "One-based position in the current {{siteName}} Top 100 response."
           },
           "id": {
             "type": "string"

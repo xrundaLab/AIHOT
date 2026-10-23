@@ -65,7 +65,7 @@ export function McpPanel(props: AgentPanelProps) {
           rows={[
             [<Mono>{T.latest}</Mono>, "过去 24 小时或最近 7 天的精选、全部资讯", `${subjectAfter("今天有什么", "新闻")}？`],
             [<Mono>{T.search}</Mono>, AGENT.search.scope, AGENT.search.ask],
-            [<Mono>{T.hot}</Mono>, "当前热点榜 Top 10", "现在最热的是什么？"],
+            [<Mono>{T.hot}</Mono>, "当前热点榜 Top 100", "现在最热的是什么？"],
             [<Mono>{T.story}</Mono>, "一个热点事件的时间线和持续更新的综述", "这件事的来龙去脉？"],
             [<Mono>{T.daily}</Mono>, subjectAfter("最新或指定日期的", "日报"), "给我今天的日报。"],
             [<Mono>{T.weekly}</Mono>, subjectAfter("最新或指定一周的", "周报"), `${subjectAfter("这周", "圈")}有哪些大事？`],
@@ -207,7 +207,7 @@ export function ApiPanel(props: AgentPanelProps) {
             { group: "资讯" },
             [<Mono>/api/v1/items</Mono>, "精选或最近 7 天全部动态，可按分类、时间窗、关键词筛", "最快 1 分钟一次"],
             { group: "热点与事件" },
-            [<Mono>/api/v1/hot-topics</Mono>, "当前热点榜 Top 10", "最快 1 分钟一次"],
+            [<Mono>/api/v1/hot-topics</Mono>, "当前热点榜 Top 100", "最快 1 分钟一次"],
             [<Mono>{"/api/v1/stories/{publicId}"}</Mono>, "一个事件的报道时间线、AI 综述和关联事件", "需要时"],
             { group: "日报" },
             [<Mono>/api/v1/dailies/latest</Mono>, "最新一期日报", `${EDITION_WHEN.daily} 后一次`],

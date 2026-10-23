@@ -52,7 +52,7 @@ export function registerAgent(app: FastifyInstance) {
 
   app.get("/api/v1/agent/hot", publicHandler(async (req, reply) => {
     const q = strictQuery(req, ["limit"]);
-    return markdown(req, reply, hotAnswer(await v1HotTopics(), intParam(q.limit, "limit", 1, 10, 10), "http"), "agent-hot", V1_OPERATIONS.hotTopics.cacheControl);
+    return markdown(req, reply, hotAnswer(await v1HotTopics(), intParam(q.limit, "limit", 1, 100, 100), "http"), "agent-hot", V1_OPERATIONS.hotTopics.cacheControl);
   }));
 
   app.get("/api/v1/agent/stories/:publicId", publicHandler(async (req, reply) => {
