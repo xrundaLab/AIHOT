@@ -20,20 +20,22 @@ export const SELECTION = {
 } as const;
 
 // 各内容类型的五项权重，程序按此计算分数；修改时同步评分提示词和评测。
+// Seven current public categories use the calibrated family/editorial rubric.
+// Legacy itemTypes retain their previous weights only for fallback when an active category is absent.
 export const SCORE_WEIGHTS = {
-  news: { sig: 1, nov: 2, cred: 1, reson: 4, act: 2 },
-  policy: { sig: 1, nov: 2, cred: 1, reson: 4, act: 2 },
-  product: { sig: 1, nov: 2, cred: 1, reson: 4, act: 2 },
-  research: { sig: 1, nov: 2, cred: 1, reson: 4, act: 2 },
-  method: { sig: 1, nov: 2, cred: 1, reson: 4, act: 2 },
-  resource: { sig: 1, nov: 2, cred: 1, reson: 4, act: 2 },
-  opinion: { sig: 1, nov: 2, cred: 1, reson: 4, act: 2 },
-  policy_change: { sig: 1, nov: 2, cred: 1, reson: 4, act: 2 },
-  education_event: { sig: 1, nov: 2, cred: 1, reson: 4, act: 2 },
-  research_finding: { sig: 1, nov: 2, cred: 1, reson: 4, act: 2 },
-  health_safety_event: { sig: 1, nov: 2, cred: 1, reson: 4, act: 2 },
-  family_issue: { sig: 1, nov: 2, cred: 1, reson: 4, act: 2 },
-  technology_change: { sig: 1, nov: 2, cred: 1, reson: 4, act: 2 },
-  practical_guide: { sig: 1, nov: 2, cred: 1, reson: 4, act: 2 },
-  opinion_analysis: { sig: 1, nov: 2, cred: 1, reson: 4, act: 2 },
+  news: { sig: 2, nov: 2, cred: 1, reson: 3, act: 2 },
+  policy: { sig: 3, nov: 2, cred: 0, reson: 3, act: 2 },
+  product: { sig: 1, nov: 3, cred: 1, reson: 3, act: 2 },
+  research: { sig: 0, nov: 2, cred: 3, reson: 3, act: 2 },
+  method: { sig: 0, nov: 2, cred: 2, reson: 3, act: 3 },
+  resource: { sig: 0, nov: 2, cred: 2, reson: 3, act: 3 },
+  opinion: { sig: 0, nov: 3, cred: 1, reson: 3, act: 3 },
+  policy_change: { sig: 3, nov: 1, cred: 2, reson: 3, act: 1 },
+  education_event: { sig: 2, nov: 2, cred: 1, reson: 4, act: 1 },
+  research_finding: { sig: 2, nov: 2, cred: 2, reson: 3, act: 1 },
+  health_safety_event: { sig: 3, nov: 1, cred: 2, reson: 3, act: 1 },
+  family_issue: { sig: 2, nov: 2, cred: 1, reson: 4, act: 1 },
+  technology_change: { sig: 1, nov: 3, cred: 1, reson: 4, act: 1 },
+  practical_guide: { sig: 1, nov: 2, cred: 1, reson: 5, act: 1 },
+  opinion_analysis: { sig: 1, nov: 3, cred: 1, reson: 4, act: 1 },
 } as const;
