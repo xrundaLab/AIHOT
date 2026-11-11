@@ -1,12 +1,40 @@
 // Reuse translated wording when only the source's layout, media or link destinations change.
 import * as cheerio from "cheerio";
 import type { Element } from "domhandler";
-import { collapseWhitespace } from "../lib/text.ts";
+import { collapseWhitespace, escapeXml } from "../lib/text.ts";
 
 const BLOCK = "p,h1,h2,h3,h4,h5,h6,li,blockquote,figcaption,td,th,dt,dd,caption";
 const MEDIA = "picture,video,img";
 
 export class PresentationMismatch extends Error {}
+
+/** A pushed image can also appear inside the article; remember both origins after deduplication. */
+export function pushedImageUrls(html: string | null): string[] {
+  const $ = cheerio.load(html ?? "", null, false);
+  return [...new Set($("[data-ingest-images] img[src], img[data-ingest-image][src]").toArray().map(img => $(img).attr("src")!))];
+}
+
+export function articleImageUrls(html: string | null): string[] {
+  const $ = cheerio.load(html ?? "", null, false);
+  $("[data-ingest-images]").remove();
+  return $("img[src]").toArray().map(img => $(img).attr("src")!);
+}
+
+export function withPushedImages(html: string | null, urls: string[]): string {
+  const $ = cheerio.load(html ?? "", null, false);
+  $("[data-ingest-images]").remove();
+  $("img[data-ingest-image]").removeAttr("data-ingest-image");
+  const pushed = new Set(urls);
+  $("img[src]").each((_, img) => {
+    if (pushed.has($(img).attr("src")!)) $(img).attr("data-ingest-image", "");
+  });
+  const bodyImages = new Set($("img[src]").toArray().map(img => $(img).attr("src")));
+  const appended = [...new Set(urls)].filter(url => !bodyImages.has(url));
+  if (appended.length) {
+    $.root().append(`<div data-ingest-images>${appended.map(url => `<p><img src="${escapeXml(url)}"></p>`).join("")}</div>`);
+  }
+  return $.html();
+}
 
 export function presentationCounts(html: string | null): { images: number; links: number } {
   const $ = cheerio.load(html ?? "", null, false);

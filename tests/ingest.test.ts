@@ -1,10 +1,12 @@
 // A paused external source must not accept new reports or look healthy after a rejected push.
 import "./setup.ts";
 import assert from "node:assert/strict";
+import http from "node:http";
 import { after, before, test } from "node:test";
 import { config } from "@aihot/backend/config";
 import { closeDb, sql } from "@aihot/backend/db";
 import { IngestError, ingestItems } from "@aihot/backend/ingest/items";
+import { extractArticleBody } from "@aihot/backend/content/extract";
 import { stopBoss } from "@aihot/backend/jobs/queue";
 import { Reply, stub, tag } from "./setup.ts";
 
@@ -29,6 +31,7 @@ const dajiala = await stub((_hit, req) => {
 });
 process.env.DAJIALA_BASE_URL = dajiala.url;
 process.env.DAJIALA_KEY = "test-key";
+process.env.WECHAT_PROVIDER = "dajiala";
 config.allowPrivateNetworkFetch = true;
 
 before(async () => {
@@ -71,6 +74,226 @@ test("an externally reported calendar day stays date-only through storage", asyn
   const [row] = await sql`SELECT publication_time, published_at_claim FROM articles WHERE source_id=${sourceId}`;
   assert.equal(row!.publication_time, "2026-10-13");
   assert.equal(row!.published_at_claim.toISOString(), "2026-10-13T00:00:00.000Z");
+});
+
+test("ingest stores supplied body and images without fetching the article page", async () => {
+  const sourceId = `test-body-ingest-${tag()}`;
+  const url = `https://example.org/${sourceId}`;
+  await ingestItems({ sourceId, items: [{
+    title: "Full report", url,
+    bodyText: "Report <script>unsafe()</script> and useful facts.",
+    images: ["https://example.org/cover.png", "javascript:alert(1)", "https://example.org/cover.png"],
+  }] });
+  const [row] = await sql<{ body_text: string; body_html: string; body_status: string; media: Array<{ kind: string; url: string }> }[]>`
+    SELECT body_text, body_html, body_status, media FROM articles WHERE source_id=${sourceId}`;
+  assert.equal(row!.body_text, "Report <script>unsafe()</script> and useful facts.");
+  assert.match(row!.body_html, /&lt;script&gt;unsafe\(\)&lt;\/script&gt;/);
+  assert.doesNotMatch(row!.body_html, /<script/);
+  assert.match(row!.body_html, /<img src="https:\/\/example.org\/cover.png">/);
+  assert.equal(row!.body_status, "ok");
+  assert.deepEqual(row!.media, [{ kind: "image", url: "https://example.org/cover.png" }]);
+  await ingestItems({ sourceId, items: [{ title: "Full report", url }] });
+  const [afterRetry] = await sql<{ body_text: string; media: Array<{ kind: string; url: string }> }[]>`
+    SELECT body_text, media FROM articles WHERE source_id=${sourceId}`;
+  assert.equal(afterRetry!.body_text, row!.body_text);
+  assert.deepEqual(afterRetry!.media, row!.media);
+});
+
+test("ingest replaces images independently while preserving body and model translation", async () => {
+  const sourceId = `test-images-ingest-${tag()}`;
+  const item = { title: "Report", url: `https://example.org/${sourceId}` };
+  await ingestItems({ sourceId, items: [{ ...item, bodyText: "Original report." }] });
+  const [original] = await sql`SELECT id, revision, body_html FROM articles WHERE source_id=${sourceId}`;
+  await sql`INSERT INTO translations(article_id,lang,revision,body_html,body_text,complete,origin)
+    VALUES (${original!.id},'zh',${original!.revision},'<p>原始报道。</p>','原始报道。',true,'model')`;
+
+  const read = async () => {
+    const [row] = await sql`SELECT a.body_text, a.body_html, a.media, a.revision, t.body_html AS translated_html
+      FROM articles a JOIN translations t ON t.article_id=a.id AND t.lang='zh' WHERE a.id=${original!.id}`;
+    return row!;
+  };
+  for (const images of [["https://example.org/first.png"], ["https://example.org/second.png"], []]) {
+    await ingestItems({ sourceId, items: [{ ...item, images }] });
+    const row = await read();
+    assert.equal(row.body_text, "Original report.");
+    assert.match(row.body_html, /Original report\./);
+    assert.match(row.translated_html, /原始报道。/);
+    assert.equal(row.revision, original!.revision);
+    assert.deepEqual(row.media, images.map(url => ({ kind: "image", url })));
+    for (const html of [row.body_html, row.translated_html]) {
+      assert.equal((html.match(/<img /g) ?? []).length, images.length);
+      if (images.length) assert.ok(html.includes(images[0]));
+    }
+    await ingestItems({ sourceId, items: [item] });
+    assert.deepEqual(await read(), row, "omitting both optional fields preserves presentation");
+  }
+});
+
+test("ingest keeps images when updating only the body", async () => {
+  const sourceId = `test-body-update-${tag()}`;
+  const item = { title: "Report", url: `https://example.org/${sourceId}` };
+  const images = ["https://example.org/cover.png"];
+  await ingestItems({ sourceId, items: [{ ...item, bodyText: "First report.", images }] });
+  await ingestItems({ sourceId, items: [{ ...item, bodyText: "Updated report." }] });
+  const [row] = await sql`SELECT body_text, body_html, media FROM articles WHERE source_id=${sourceId}`;
+  assert.equal(row!.body_text, "Updated report.");
+  assert.match(row!.body_html, /Updated report\./);
+  assert.match(row!.body_html, /cover\.png/);
+  assert.deepEqual(row!.media, images.map(url => ({ kind: "image", url })));
+});
+
+test("an image-only push stays pending until the page body is extracted, retaining distinct pushed images", async () => {
+  const articleText = "A detailed original report with enough information for article extraction. ".repeat(12);
+  const page = http.createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "text/html" });
+    res.end(`<html><head><title>Article</title></head><body><article><h1>Article</h1><p>${articleText}</p><img src="https://example.org/shared.png"></article></body></html>`);
+  });
+  await new Promise<void>(resolve => page.listen(0, "127.0.0.1", resolve));
+  try {
+    const sourceId = `test-pending-images-${tag()}`;
+    const url = `http://127.0.0.1:${(page.address() as { port: number }).port}/${tag()}`;
+    await ingestItems({ sourceId, items: [{ title: "Article", url, images: ["https://example.org/shared.png", "https://example.org/pushed.png"] }] });
+    const [before] = await sql`SELECT id,body_status FROM articles WHERE source_id=${sourceId}`;
+    assert.equal(before!.body_status, "pending");
+    assert.equal(await extractArticleBody(before!.id), "ok");
+    const [after] = await sql`SELECT body_text,body_html,body_status,media FROM articles WHERE id=${before!.id}`;
+    assert.match(after!.body_text, /detailed original report/);
+    assert.equal(after!.body_status, "ok");
+    assert.equal((after!.body_html.match(/shared\.png/g) ?? []).length, 1);
+    assert.equal((after!.body_html.match(/pushed\.png/g) ?? []).length, 1);
+    assert.deepEqual(after!.media.map((image: { url: string }) => image.url).sort(), ["https://example.org/pushed.png", "https://example.org/shared.png"]);
+    await sql`UPDATE articles SET body_status='pending' WHERE id=${before!.id}`;
+    assert.equal(await extractArticleBody(before!.id), "ok", "a repeated extraction does not duplicate pushed images");
+    const [again] = await sql`SELECT body_html FROM articles WHERE id=${before!.id}`;
+    assert.equal((again!.body_html.match(/pushed\.png/g) ?? []).length, 1);
+    await ingestItems({ sourceId, items: [{ title: "Article", url, images: [] }] });
+    const [cleared] = await sql`SELECT body_html,media FROM articles WHERE id=${before!.id}`;
+    assert.equal((cleared!.body_html.match(/shared\.png/g) ?? []).length, 1, "an image in the page body remains");
+    assert.doesNotMatch(cleared!.body_html, /pushed\.png/);
+    assert.deepEqual(cleared!.media.map((image: { url: string }) => image.url), ["https://example.org/shared.png"]);
+  } finally {
+    page.close();
+  }
+});
+
+test("a shared page image survives a later text-only push and can then be cleared", async () => {
+  const sourceId = `test-shared-image-${tag()}`;
+  const item = { title: "Report", url: `https://example.org/${sourceId}` };
+  const images = ["https://example.org/shared.png"];
+  await ingestItems({ sourceId, items: [{ ...item, bodyText: "Original report." }] });
+  await sql`UPDATE articles SET body_html='<p>Original report.</p><img src="https://example.org/shared.png">'
+    WHERE source_id=${sourceId}`;
+  await ingestItems({ sourceId, items: [{ ...item, images }] });
+  const [shared] = await sql`SELECT body_html FROM articles WHERE source_id=${sourceId}`;
+  assert.equal((shared!.body_html.match(/shared\.png/g) ?? []).length, 1);
+  await ingestItems({ sourceId, items: [{ ...item, bodyText: "Updated report." }] });
+  const [updated] = await sql`SELECT body_text,body_html,media FROM articles WHERE source_id=${sourceId}`;
+  assert.equal(updated!.body_text, "Updated report.");
+  assert.equal((updated!.body_html.match(/shared\.png/g) ?? []).length, 1);
+  assert.deepEqual(updated!.media, [{ kind: "image", url: images[0] }]);
+  await ingestItems({ sourceId, items: [{ ...item, images: [] }] });
+  const [cleared] = await sql`SELECT body_html,media FROM articles WHERE source_id=${sourceId}`;
+  assert.doesNotMatch(cleared!.body_html, /shared\.png/);
+  assert.deepEqual(cleared!.media, []);
+});
+
+test("combined body and image updates retain media according to the body actually saved", async () => {
+  const shared = "https://example.org/shared.png";
+  const replacement = "https://example.org/replacement.png";
+  const unrelated = [{ kind: "image", url: "https://example.org/cover.png" }, { kind: "video", url: "https://example.org/video.mp4" }];
+  for (const mode of ["omitted", "changed", "same", "historical", "character-loss", "baseline"] as const) {
+    for (const images of [undefined, [], [replacement]]) {
+      const context = `${mode}, images=${JSON.stringify(images)}`;
+      const sourceId = `test-combined-images-${tag()}`;
+      const item = { title: "Report", url: `https://example.org/${sourceId}` };
+      await ingestItems({ sourceId, items: [{ ...item, bodyText: "Earlier report." }] });
+      await ingestItems({ sourceId, items: [{ ...item, bodyText: "Current report." }] });
+      await sql`UPDATE articles SET body_html=${`<p>Current report.</p><img src="${shared}">`},
+        media=${sql.json(unrelated)} WHERE source_id=${sourceId}`;
+      await ingestItems({ sourceId, items: [{ ...item, images: [shared] }] });
+      if (mode === "baseline") await sql`UPDATE articles SET content_hash=NULL WHERE source_id=${sourceId}`;
+      const [before] = await sql`SELECT id,revision FROM articles WHERE source_id=${sourceId}`;
+      const bodyText = mode === "omitted" ? undefined : mode === "historical" ? "Earlier report."
+        : mode === "character-loss" ? "Current rep\uFFFDrt." : mode === "same" ? "Current report." : "New report.";
+      await ingestItems({ sourceId, items: [{ ...item, bodyText, images }] });
+      const [saved] = await sql`SELECT body_text,body_html,media,revision FROM articles WHERE id=${before!.id}`;
+      const keepsBodyImage = ["omitted", "historical", "character-loss"].includes(mode);
+      const expectedImages = [...(keepsBodyImage || images === undefined ? [shared] : []), ...(images ?? [])];
+      assert.deepEqual(saved!.media, [...unrelated, ...expectedImages.map(url => ({ kind: "image", url }))], context);
+      assert.equal(saved!.body_text, mode === "changed" || mode === "baseline" ? "New report." : "Current report.", context);
+      assert.equal(saved!.revision, before!.revision + (mode === "changed" || mode === "baseline" ? 1 : 0), context);
+      for (const url of [shared, replacement]) {
+        assert.equal(saved!.body_html.split(url).length - 1, expectedImages.includes(url) ? 1 : 0, context);
+      }
+      await ingestItems({ sourceId, items: [{ ...item, images: [] }] });
+      const [cleared] = await sql`SELECT body_html,media FROM articles WHERE id=${before!.id}`;
+      assert.deepEqual(cleared!.media, [...unrelated, ...(keepsBodyImage ? [{ kind: "image", url: shared }] : [])], context);
+      assert.equal(cleared!.body_html.includes(shared), keepsBodyImage, context);
+      assert.doesNotMatch(cleared!.body_html, /replacement\.png/, context);
+    }
+  }
+});
+
+test("an explicit body is saved for imported history and does not need page extraction", async () => {
+  for (const previousBody of [undefined, "Previous report.", "Supplied report."]) {
+    const sourceId = `test-imported-body-${tag()}`;
+    const item = { title: "Report", url: `https://example.org/${sourceId}` };
+    await ingestItems({ sourceId, items: [{ ...item, bodyText: previousBody }] });
+    await sql`UPDATE articles SET content_hash=NULL,body_status='pending' WHERE source_id=${sourceId}`;
+    const [before] = await sql`SELECT id,revision FROM articles WHERE source_id=${sourceId}`;
+    await ingestItems({ sourceId, items: [{ ...item, bodyText: "Supplied report." }] });
+    const [saved] = await sql`SELECT body_text,body_html,body_status,revision,content_hash FROM articles WHERE id=${before!.id}`;
+    assert.equal(saved!.body_text, "Supplied report.");
+    assert.match(saved!.body_html, /Supplied report\./);
+    assert.equal(saved!.body_status, "ok");
+    assert.equal(saved!.revision, before!.revision + (previousBody === "Supplied report." ? 0 : 1));
+    const [revision] = await sql`SELECT body_text,content_hash FROM article_revisions
+      WHERE article_id=${before!.id} AND revision=${saved!.revision}`;
+    assert.equal(revision!.body_text, saved!.body_text);
+    assert.equal(revision!.content_hash, saved!.content_hash);
+    assert.equal(await extractArticleBody(before!.id), "skipped");
+    await ingestItems({ sourceId, items: [{ ...item, bodyText: "Supplied report." }] });
+    const [retry] = await sql`SELECT revision FROM articles WHERE id=${before!.id}`;
+    assert.equal(retry!.revision, saved!.revision);
+  }
+});
+
+test("image changes survive baseline, historical, and character-loss deduplication without a revision", async () => {
+  for (const branch of ["baseline", "historical", "character-loss"] as const) {
+    const sourceId = `test-image-${branch}-${tag()}`;
+    const url = `https://example.org/${sourceId}`;
+    const item = { title: "Report", url };
+    await ingestItems({ sourceId, items: [{ ...item, bodyText: "An original report with complete words.", images: ["https://example.org/old.png"] }] });
+    if (branch === "baseline") await sql`UPDATE articles SET content_hash=NULL WHERE source_id=${sourceId}`;
+    if (branch === "historical") await ingestItems({ sourceId, items: [{ ...item, bodyText: "A revised report with complete words." }] });
+    const [before] = await sql`SELECT id,revision,body_text FROM articles WHERE source_id=${sourceId}`;
+    const reportedBody = branch === "historical" ? "An original report with complete words."
+      : branch === "character-loss" ? "An original report with complete w\uFFFDrds." : undefined;
+    await ingestItems({ sourceId, items: [{ ...item, ...(reportedBody ? { bodyText: reportedBody } : {}), images: ["https://example.org/new.png"] }] });
+    const [changed] = await sql`SELECT revision,body_text,body_html,media FROM articles WHERE id=${before!.id}`;
+    assert.equal(changed!.revision, before!.revision, branch);
+    assert.equal(changed!.body_text, before!.body_text, branch);
+    assert.deepEqual(changed!.media, [{ kind: "image", url: "https://example.org/new.png" }]);
+    assert.match(changed!.body_html, /new\.png/);
+    assert.doesNotMatch(changed!.body_html, /old\.png/);
+    await ingestItems({ sourceId, items: [{ ...item, images: [] }] });
+    const [cleared] = await sql`SELECT revision,body_text,body_html,media FROM articles WHERE id=${before!.id}`;
+    assert.equal(cleared!.revision, before!.revision);
+    assert.equal(cleared!.body_text, before!.body_text);
+    assert.deepEqual(cleared!.media, []);
+    assert.doesNotMatch(cleared!.body_html, /new\.png/);
+  }
+});
+
+test("a different source cannot replace the owner's pushed images", async () => {
+  const owner = `test-image-owner-${tag()}`;
+  const other = `test-image-mirror-${tag()}`;
+  const url = `https://example.org/${owner}`;
+  await ingestItems({ sourceId: owner, items: [{ title: "Owner", url, bodyText: "Owner text", images: ["https://example.org/owner.png"] }] });
+  const [before] = await sql`SELECT id,revision,body_html,media FROM articles WHERE source_id=${owner}`;
+  await ingestItems({ sourceId: other, items: [{ title: "Mirror", url, images: [] }] });
+  const [after] = await sql`SELECT revision,body_html,media FROM articles WHERE id=${before!.id}`;
+  assert.deepEqual(after, { revision: before!.revision, body_html: before!.body_html, media: before!.media });
 });
 
 test("manual WeChat ingest enriches only new article links and uses the provider publication time", async () => {
