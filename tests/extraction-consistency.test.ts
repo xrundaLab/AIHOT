@@ -50,6 +50,29 @@ after(async () => { page.close(); await socialdata.close(); await stopBoss(); aw
 const reset = (count = 1, empty = false) => { presentationHtml = null; hold = { entered: gate(), release: gate(), count, empty }; };
 const state = async (id: string) => ({ ...(await sql`SELECT title,body_text,body_status,revision,content_hash FROM articles WHERE id=${id}`)[0] });
 
+test("manual extraction keeps confirmed text when the page has no body", async () => {
+  reset(1, true); hold.release.open();
+  const { articleId } = await upsertMaterial({ sourceId, url: `${base}/${tag()}`, title: "Original", via: "fetch", bodyText: body, bodyHtml: `<p>${body}</p>`, bodyStatus: "ok" });
+  const job = await rerun(articleId, "extract", `extract-${tag()}`, "test");
+  assert.ok(job?.jobId);
+  const [queued] = await sql`SELECT data FROM pgboss.job WHERE id=${job.jobId}`;
+  assert.equal(queued!.data.force, true);
+  assert.equal((await state(articleId)).body_status, "ok");
+  assert.equal(await extractArticleBody(articleId, { force: true }), "skipped");
+  assert.equal((await state(articleId)).body_status, "ok");
+  assert.equal((await state(articleId)).body_text, body);
+});
+
+test("manual extraction can replace confirmed text when a newer body is available", async () => {
+  reset(); hold.release.open();
+  const { articleId } = await upsertMaterial({ sourceId, url: `${base}/${tag()}`, title: "Original", via: "fetch", bodyText: "Old report.", bodyHtml: "<p>Old report.</p>", bodyStatus: "ok" });
+  assert.equal(await extractArticleBody(articleId, { force: true }), "ok");
+  const row = await state(articleId);
+  assert.match(row.body_text, /original article/);
+  assert.equal(row.body_status, "ok");
+  assert.equal(row.revision, 2);
+});
+
 test("ordinary extraction preserves existing media and only fills an empty media list", async () => {
   for (const hasMedia of [true, false]) {
     reset(); hold.release.open();

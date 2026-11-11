@@ -7,6 +7,7 @@ import { config } from "@aihot/backend/config";
 import { closeDb, sql } from "@aihot/backend/db";
 import { IngestError, ingestItems } from "@aihot/backend/ingest/items";
 import { extractArticleBody } from "@aihot/backend/content/extract";
+import { publishArticle } from "@aihot/backend/publication/publish";
 import { stopBoss } from "@aihot/backend/jobs/queue";
 import { Reply, stub, tag } from "./setup.ts";
 
@@ -74,6 +75,27 @@ test("an externally reported calendar day stays date-only through storage", asyn
   const [row] = await sql`SELECT publication_time, published_at_claim FROM articles WHERE source_id=${sourceId}`;
   assert.equal(row!.publication_time, "2026-10-13");
   assert.equal(row!.published_at_claim.toISOString(), "2026-10-13T00:00:00.000Z");
+});
+
+test("repeating a supplied body confirms it without creating another revision", async () => {
+  for (const [status, imported] of [["pending", false], ["unconfirmed", false], ["unconfirmed", true]] as const) {
+    const sourceId = `test-reconfirm-${tag()}`;
+    const item = { title: "Report", url: `https://example.org/${sourceId}`, bodyText: "Supplied report." };
+    await ingestItems({ sourceId, items: [item] });
+    const [before] = await sql`SELECT id,revision FROM articles WHERE source_id=${sourceId}`;
+    await sql`UPDATE sources SET site_fulltext=true,participation_mode='editorial' WHERE id=${sourceId}`;
+    await sql`UPDATE articles SET body_status=${status} WHERE id=${before!.id}`;
+    if (imported) await sql`UPDATE articles SET content_hash=NULL WHERE id=${before!.id}`;
+    await sql`INSERT INTO analyses (article_id,input_revision,origin,relevance,summary_zh,selected)
+      VALUES (${before!.id},${before!.revision},'rule','pass','摘要',false)`;
+    await publishArticle(before!.id);
+    assert.equal((await sql`SELECT body_mode FROM publications WHERE article_id=${before!.id}`)[0]!.body_mode, "summary");
+    await ingestItems({ sourceId, items: [item] });
+    const [after] = await sql`SELECT body_status,revision FROM articles WHERE id=${before!.id}`;
+    assert.equal(after!.body_status, "ok", status);
+    assert.equal(after!.revision, before!.revision);
+    assert.equal((await sql`SELECT body_mode FROM publications WHERE article_id=${before!.id}`)[0]!.body_mode, "full");
+  }
 });
 
 test("ingest stores supplied body and images without fetching the article page", async () => {

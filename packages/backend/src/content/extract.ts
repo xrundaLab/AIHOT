@@ -457,12 +457,12 @@ export function pageFetchable(url: string, sourceKind: string): boolean {
 }
 
 /** Fetches and stores the body of one article. Unconfirmed bodies are recorded as such. */
-export async function extractArticleBody(articleId: string): Promise<"ok" | "unconfirmed" | "skipped"> {
+export async function extractArticleBody(articleId: string, options: { force?: boolean } = {}): Promise<"ok" | "unconfirmed" | "skipped"> {
   const [a] = await sql<{ id: string; url: string; body_status: string; revision: number; x_post: { tweetId?: string } | null; config: SourceRow["config"] }[]>`
     SELECT a.id, a.url, a.body_status, a.revision, a.x_post, s.config
     FROM articles a JOIN sources s ON s.id = a.source_id WHERE a.id = ${articleId}`;
-  if (!a || a.body_status === "ok") return "skipped";
-  if (a.x_post?.tweetId) return extractXArticle(a.id, a.x_post.tweetId, a.revision);
+  if (!a || (a.body_status === "ok" && !options.force)) return "skipped";
+  if (a.x_post?.tweetId) return extractXArticle(a.id, a.x_post.tweetId, a.revision, a.body_status, !!options.force);
   const got = await extractFromUrl(a.url, `article:${a.id}`, pageRules(a.config));
   if (!got) {
     return markUnconfirmed(articleId, a.revision);
@@ -471,7 +471,7 @@ export async function extractArticleBody(articleId: string): Promise<"ok" | "unc
   return sql.begin(async (tx) => {
     const [row] = await tx<{ title: string; excerpt: string | null; content_hash: string | null; body_html: string | null; media: MediaItem[] }[]>`
       SELECT title, excerpt, content_hash, body_html, media FROM articles
-      WHERE id = ${articleId} AND revision = ${a.revision} AND body_status <> 'ok' FOR UPDATE`;
+      WHERE id = ${articleId} AND revision = ${a.revision} AND (body_status <> 'ok' OR (${!!options.force} AND body_status = ${a.body_status})) FOR UPDATE`;
     if (!row) return "skipped";
     const pushed = pushedImageUrls(row.body_html);
     const html = pushed.length ? withPushedImages(got.html, pushed) : got.html;
@@ -505,7 +505,7 @@ async function markUnconfirmed(articleId: string, revision: number): Promise<"un
  * No article (the link points at someone else's, or X has none) leaves the post "unconfirmed", and
  * the judging steps are told the article was not fetched.
  */
-async function extractXArticle(articleId: string, tweetId: string, revision: number): Promise<"ok" | "unconfirmed" | "skipped"> {
+async function extractXArticle(articleId: string, tweetId: string, revision: number, previousStatus: string, force: boolean): Promise<"ok" | "unconfirmed" | "skipped"> {
   const found = await getArticle(tweetId, { purpose: "x_article", subject: `article:${articleId}` });
   const got = found ? xArticleText(found) : null;
   if (!got) {
@@ -514,7 +514,7 @@ async function extractXArticle(articleId: string, tweetId: string, revision: num
   return sql.begin(async (tx) => {
     const [row] = await tx<{ title: string; excerpt: string | null; body_text: string | null; x_post: { text?: string } | null; x_article: { title?: string | null; text?: string } | null }[]>`
       SELECT title, excerpt, body_text, x_post, x_article FROM articles
-      WHERE id = ${articleId} AND revision = ${revision} AND body_status <> 'ok' FOR UPDATE`;
+      WHERE id = ${articleId} AND revision = ${revision} AND (body_status <> 'ok' OR (${force} AND body_status = ${previousStatus})) FOR UPDATE`;
     if (!row) return "skipped";
     const block = (a: { title?: string | null; text?: string } | null) => (a ? [a.title ? `# ${a.title}` : "", a.text ?? ""].filter(Boolean).join("\n\n") : "");
     // The post's own text, without an article appended by an earlier extraction (an admin re-run

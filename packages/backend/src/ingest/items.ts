@@ -10,6 +10,8 @@ import { identityKeyForUrl, normalizeUrl } from "../lib/url.ts";
 import { stripTags } from "../lib/text.ts";
 import { sanitizeBody, textToHtml } from "../content/sanitize.ts";
 import { mpArticle, mpProviderName } from "../providers/wechat.ts";
+import { publishArticleTx } from "../publication/publish.ts";
+import { emit } from "../modules.ts";
 
 export const MAX_ITEMS = 50;
 // Images accepted per item; matches the documented limit in docs/sources.md.
@@ -134,8 +136,8 @@ export async function ingestItems(body: { sourceId?: unknown; sourceName?: unkno
     }
     const res = await sql.begin(async (tx) => {
       const identity = bodyText || Array.isArray(it.images) ? identityKeyForUrl(rawUrl) : null;
-      const [previous] = identity ? await tx<{ source_id: string; body_html: string | null }[]>`
-        SELECT source_id, body_html FROM articles WHERE identity_key=${identity} FOR UPDATE` : [];
+      const [previous] = identity ? await tx<{ source_id: string; body_html: string | null; body_status: string }[]>`
+        SELECT source_id, body_html, body_status FROM articles WHERE identity_key=${identity} FOR UPDATE` : [];
       const previousImages = previous?.source_id === source!.id ? pushedImageUrls(previous.body_html) : [];
       const result = await upsertMaterial({
         sourceId: source!.id,
@@ -154,8 +156,8 @@ export async function ingestItems(body: { sourceId?: unknown; sourceName?: unkno
         backfill: flags.backfill ? "reported-backfill" : flags.baseline ? "reported-baseline" : null,
       }, tx);
       if (bodyText || Array.isArray(it.images)) {
-        const [stored] = await tx<{ source_id: string; body_html: string | null; media: MediaItem[] }[]>`
-          SELECT source_id, body_html, media FROM articles WHERE id = ${result.articleId} FOR UPDATE`;
+        const [stored] = await tx<{ source_id: string; body_html: string | null; body_text: string | null; body_status: string; media: MediaItem[] }[]>`
+          SELECT source_id, body_html, body_text, body_status, media FROM articles WHERE id = ${result.articleId} FOR UPDATE`;
         // Only the owning source can update presentation, just as with the material itself.
         // The row cannot vanish in normal flow; a null stored means a concurrent delete between
         // upsert and this select, which is only observed under test contention. Skip the
@@ -173,6 +175,14 @@ export async function ingestItems(body: { sourceId?: unknown; sourceName?: unkno
             ? [...retainedMedia, ...media.filter(image => !retainedMedia.some(saved => saved.kind === image.kind && saved.url === image.url))]
             : undefined;
           await updatePresentation(tx, result.articleId, { html: withPushedImages(stored.body_html, pushed), media: nextMedia });
+          if (bodyText && stored.body_text === bodyText && (stored.body_status !== "ok" || (previous?.source_id === source!.id && previous.body_status !== "ok"))) {
+            if (stored.body_status !== "ok") await tx`UPDATE articles SET body_status = 'ok', updated_at = now() WHERE id = ${result.articleId}`;
+            const [published] = await tx`SELECT 1 FROM publications WHERE article_id = ${result.articleId}`;
+            if (published) {
+              await publishArticleTx(tx, result.articleId);
+              await emit("articleChanged", { id: result.articleId, kind: "body", reason: "confirmed supplied body" }, tx);
+            }
+          }
         }
       }
       return result;
