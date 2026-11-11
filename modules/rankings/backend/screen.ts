@@ -21,10 +21,10 @@ export function judgementSchema(snapshot: Pick<Snapshot, "name" | "source" | "it
     }
     data.results.forEach((r, i) => {
       const original = snapshot.items[i]!;
-      if (r.rank !== original.rank || r.title !== original.title || r.related_ranks.some(n => n === r.rank || !ranks.has(n)) || new Set(r.related_ranks).size !== r.related_ranks.length)
+      if (r.rank !== original.rank || r.title.replace(/\s+/gu, " ") !== original.title.replace(/\s+/gu, " ") || r.related_ranks.some(n => n === r.rank || !ranks.has(n)) || new Set(r.related_ranks).size !== r.related_ranks.length)
         ctx.addIssue({ code: "custom", message: `result ${i + 1} does not match snapshot` });
     });
-  });
+  }).transform(data => ({ ...data, results: data.results.map((r, i) => ({ ...r, title: snapshot.items[i]!.title })) }));
 }
 
 /** A claim is atomic; an interrupted worker's claim is eligible again after ten minutes. */
