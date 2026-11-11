@@ -16,6 +16,7 @@ import { onlyXArticleLink, xArticleText } from "../sources/x.ts";
 import { sanitizeBody, trimTrailingChrome } from "./sanitize.ts";
 import { contentHash, fillPublicationTime, reviseMaterial, updatePresentation, type MediaItem } from "./materials.ts";
 import { markdownBody } from "./markdown.ts";
+import { pushedImageUrls, withPushedImages } from "./presentation.ts";
 
 export interface ExtractedBody {
   html: string;
@@ -468,20 +469,24 @@ export async function extractArticleBody(articleId: string): Promise<"ok" | "unc
   }
   // The body is new content: a new revision, so an analysis of the body-less input counts as stale.
   return sql.begin(async (tx) => {
-    const [row] = await tx<{ title: string; excerpt: string | null; content_hash: string | null; media: MediaItem[] }[]>`
-      SELECT title, excerpt, content_hash, media FROM articles
+    const [row] = await tx<{ title: string; excerpt: string | null; content_hash: string | null; body_html: string | null; media: MediaItem[] }[]>`
+      SELECT title, excerpt, content_hash, body_html, media FROM articles
       WHERE id = ${articleId} AND revision = ${a.revision} AND body_status <> 'ok' FOR UPDATE`;
     if (!row) return "skipped";
+    const pushed = pushedImageUrls(row.body_html);
+    const html = pushed.length ? withPushedImages(got.html, pushed) : got.html;
+    const media = pushed.length
+      ? [...row.media, ...got.images.filter(image => !row.media.some(saved => saved.kind === "image" && saved.url === image.url))]
+      : row.media.length ? row.media : got.images;
     const time = a.config.detail?.publishedAtAuthoritative === true ? null : await fillPublicationTime(tx, articleId, got.publishedAt, undefined, got.publicationTime);
     const hash = contentHash({ title: row.title, bodyText: got.text, excerpt: row.excerpt });
     if (!time && hash === row.content_hash) {
-      await updatePresentation(tx, articleId, { html: got.html, media: row.media.length ? row.media : got.images });
+      await updatePresentation(tx, articleId, { html, media });
       await tx`UPDATE articles SET body_status = 'ok', updated_at = now() WHERE id = ${articleId}`;
       return "ok";
     }
     await reviseMaterial(tx, articleId, {
-      set: sql`body_html = ${got.html}, body_text = ${got.text}, body_status = 'ok',
-        media = CASE WHEN jsonb_array_length(media) = 0 THEN ${sql.json(got.images as never)}::jsonb ELSE media END`,
+      set: sql`body_html = ${html}, body_text = ${got.text}, body_status = 'ok', media = ${sql.json(media as never)}::jsonb`,
       hash, title: row.title, bodyText: got.text,
     });
     return "ok";

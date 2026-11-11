@@ -50,6 +50,23 @@ after(async () => { page.close(); await socialdata.close(); await stopBoss(); aw
 const reset = (count = 1, empty = false) => { presentationHtml = null; hold = { entered: gate(), release: gate(), count, empty }; };
 const state = async (id: string) => ({ ...(await sql`SELECT title,body_text,body_status,revision,content_hash FROM articles WHERE id=${id}`)[0] });
 
+test("ordinary extraction preserves existing media and only fills an empty media list", async () => {
+  for (const hasMedia of [true, false]) {
+    reset(); hold.release.open();
+    presentationHtml = `<p>${body}</p><img src="https://example.org/page.png">`;
+    const originalMedia = hasMedia ? [{ kind: "image" as const, url: "https://example.org/cover.png" }] : [];
+    const { articleId } = await upsertMaterial({ sourceId, url: `${base}/${tag()}`, title: "Original", via: "fetch", media: originalMedia });
+    for (const repeat of [false, true]) {
+      if (repeat) await sql`UPDATE articles SET body_status='pending' WHERE id=${articleId}`;
+      assert.equal(await extractArticleBody(articleId), "ok");
+      const [row] = await sql`SELECT body_html,media FROM articles WHERE id=${articleId}`;
+      assert.match(row!.body_html, /page\.png/);
+      assert.deepEqual(row!.media.map((image: { url: string }) => image.url),
+        [hasMedia ? "https://example.org/cover.png" : "https://example.org/page.png"]);
+    }
+  }
+});
+
 for (const x of [false, true]) for (const empty of [false, true]) {
   test(`a stale ${x ? "X Article" : "page"} ${empty ? "empty" : "successful"} response cannot change newer material`, async () => {
     reset(1, empty);

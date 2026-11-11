@@ -297,11 +297,14 @@ async function upsertIn(db: Db, m: MaterialInput): Promise<MaterialResult> {
   const bodyText = m.bodyText ?? existing!.body_text;
   const excerpt = m.excerpt ?? existing!.excerpt;
   const next = contentHash({ title, bodyText, excerpt });
+  // Explicitly supplying a different body is a real revision, even for imported history.
+  const replacesImportedBody = existing!.content_hash === null && m.via === "ingest"
+    && !!m.bodyText?.trim() && m.bodyText !== existing!.body_text;
   if (!time && existing!.content_hash === next) {
     await updatePresentation(db, existing!.id, { html: m.bodyHtml, media: m.media });
     return unchanged;
   }
-  if (!time && existing!.content_hash === null) {
+  if (!time && existing!.content_hash === null && !replacesImportedBody) {
     // Imported history carries no hash of this form (its collectors normalised differently): the
     // first report here records the baseline instead of a revision, so an import does not send
     // every article a source still lists back to paid analysis. The baseline joins the history, so
@@ -309,6 +312,10 @@ async function upsertIn(db: Db, m: MaterialInput): Promise<MaterialResult> {
     await db`UPDATE articles SET content_hash = ${next}, excerpt = coalesce(excerpt, ${m.excerpt ?? null}) WHERE id = ${existing!.id}`;
     await db`INSERT INTO article_revisions (article_id, revision, content_hash, title, body_text)
              VALUES (${existing!.id}, ${existing!.revision}, ${next}, ${title}, ${bodyText}) ON CONFLICT DO NOTHING`;
+    if (m.via === "ingest" && m.bodyText?.trim()) {
+      await db`UPDATE articles SET body_status = ${m.bodyStatus ?? "ok"} WHERE id = ${existing!.id}`;
+      await updatePresentation(db, existing!.id, { html: m.bodyHtml, media: m.media });
+    } else if (m.media !== undefined) await updatePresentation(db, existing!.id, { media: m.media });
     return unchanged;
   }
   // A version this article already had is no new material (listings that alternate between two
@@ -316,9 +323,15 @@ async function upsertIn(db: Db, m: MaterialInput): Promise<MaterialResult> {
   // already. Any earlier version counts, however long ago: a rotation with many variants would
   // otherwise start over, and a real edit reverted later is rare and loses nothing.
   const [seen] = await db`SELECT 1 FROM article_revisions WHERE article_id = ${existing!.id} AND content_hash = ${next} LIMIT 1`;
-  if (!time && seen) return unchanged;
+  if (!time && seen && !replacesImportedBody) {
+    if (m.media !== undefined) await updatePresentation(db, existing!.id, { media: m.media });
+    return unchanged;
+  }
   // Nor is the stored version with other characters lost in transit, or with them restored.
-  if (!time && sameBarringLoss(existing!.title, title) && sameBarringLoss(existing!.body_text, bodyText) && sameBarringLoss(existing!.excerpt, excerpt)) return unchanged;
+  if (!time && !replacesImportedBody && sameBarringLoss(existing!.title, title) && sameBarringLoss(existing!.body_text, bodyText) && sameBarringLoss(existing!.excerpt, excerpt)) {
+    if (m.media !== undefined) await updatePresentation(db, existing!.id, { media: m.media });
+    return unchanged;
+  }
 
   const media = m.media ? sql.json(m.media as never) : null;
   await reviseMaterial(db, existing!.id, {
