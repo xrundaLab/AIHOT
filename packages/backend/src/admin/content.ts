@@ -340,7 +340,7 @@ export async function rerun(id: string, step: AdminRerun["step"], requestId: str
   z.string().regex(/^[\w-]{8,80}$/, "a stable request id is required").parse(requestId);
   if (step === "presentation") return refreshPresentation(id, options, requestId, actor);
   return sql.begin(async (tx) => {
-    const [a] = await tx`SELECT id FROM articles WHERE id = ${id} FOR UPDATE`;
+    const [a] = await tx`SELECT id, body_status FROM articles WHERE id = ${id} FOR UPDATE`;
     if (!a) return null;
     // Queue singleton keys expire when a job completes. The committed command remains in the audit.
     const [prior] = await tx<{ after: { jobId: string | null } }[]>`
@@ -351,8 +351,8 @@ export async function rerun(id: string, step: AdminRerun["step"], requestId: str
     if (step === "group") jobId = await requestRegroup(id, requestId, tx);
     else {
       await tx`UPDATE articles SET processing_state = 'new', processing_error = NULL, processing_attempts = 0, processing_retry_at = NULL,
-                  body_status = CASE WHEN ${step === "extract"} THEN 'pending' ELSE body_status END WHERE id = ${id}`;
-      jobId = await queueProcessing(id, { step, ...(step === "analyze" ? { attemptTag: `admin:${requestId}` } : {}), db: tx });
+                  body_status = CASE WHEN ${step === "extract" && a.body_status !== "ok"} THEN 'pending' ELSE body_status END WHERE id = ${id}`;
+      jobId = await queueProcessing(id, { step, ...(step === "extract" && a.body_status === "ok" ? { forceExtract: true } : {}), ...(step === "analyze" ? { attemptTag: `admin:${requestId}` } : {}), db: tx });
     }
     await audit(actor, `content.rerun.${step}`, `content:${id}`, null, null, { jobId, requestId }, { requestId, db: tx });
     return { jobId };
