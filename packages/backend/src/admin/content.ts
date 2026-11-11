@@ -296,6 +296,7 @@ const FieldsSchema = z
     score: z.number().min(0).max(100).nullable(),
     selected: z.boolean(),
     silent: z.boolean(),
+    listUndated: z.boolean(),
   })
   .partial()
   .strict();

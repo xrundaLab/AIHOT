@@ -13,7 +13,7 @@ import { pickRepresentative, REPRESENTATIVE_COLUMNS, type RepresentativeIdentity
 import { enqueue, QUEUES, shutdownSignal } from "../jobs/queue.ts";
 import { emit } from "../modules.ts";
 import {
-  bodyModeOf, channelOf, displayTags, isIndexable, isPoolEligible, isSelectable, isIndependentSelectedSource, mayRedistribute, publicSourceName, type SourceFacts,
+  bodyModeOf, channelOf, displayTags, isIndexable, isPoolEligible, isListedByDate, isSelectable, isIndependentSelectedSource, mayRedistribute, publicSourceName, type SourceFacts,
 } from "./rules.ts";
 import { foldableSelectionCondition, latestCompositeCondition, ownFactEvidenceCondition } from "./scope.ts";
 
@@ -283,9 +283,10 @@ export async function publishArticleTx(tx: Tx, articleId: string, options: Publi
 
   // An undated archive has a readable detail page, but its discovery is not a news timestamp.
   // Explicit imports can retain an editorial decision already published elsewhere.
-  const eligible = isPoolEligible({ participationMode: source.participation_mode, relevance, title, summary, originalPost: !!original })
-    && (!article.backfill || article.published_at !== null || !!options.releasedAt);
-  const selectionCandidate = isSelectable(eligible, judgedSelected, source.tier);
+  const contentEligible = isPoolEligible({ participationMode: source.participation_mode, relevance, title, summary, originalPost: !!original });
+  const normalDate = isListedByDate({ backfill: article.backfill, publishedAt: article.published_at, releasedAt: options.releasedAt, listUndated: false });
+  const eligible = contentEligible && isListedByDate({ backfill: article.backfill, publishedAt: article.published_at, releasedAt: options.releasedAt, listUndated: article.published_at === null && f.listUndated === true });
+  const selectionCandidate = isSelectable(contentEligible && normalDate, judgedSelected, source.tier);
   // Scoring nominates a report; a completed identity/value decision admits it to selection.
   // A historical import already has its public decision. Preserve that confirmed state on rebuild.
   const selected = selectionCandidate && article.grouping_status === "complete"

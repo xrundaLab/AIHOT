@@ -48,7 +48,7 @@ export default function ContentItem({ loaderData }: Route.ComponentProps) {
   const [dialog, setDialog] = useState<Dialog>(null);
   const [presentation, setPresentation] = useState<AdminPresentationRefresh | null>(null);
   const [visibility, setVisibility] = useState<string>(p?.visibility ?? "public");
-  const [fields, setFields] = useState({ title: "", summary: "", reason: "", category: "", tags: "", scoreMode: "", score: "", selected: "", silent: "" });
+  const [fields, setFields] = useState({ title: "", summary: "", reason: "", category: "", tags: "", scoreMode: "", score: "", selected: "", silent: "", listUndated: "" });
   const [mergeInto, setMergeInto] = useState("");
   const version = c.override?.version ?? 0;
   const base = `/api/admin/content/${encodeURIComponent(a.id)}`;
@@ -67,6 +67,7 @@ export default function ContentItem({ loaderData }: Route.ComponentProps) {
       score: typeof f.score === "number" ? String(f.score) : "",
       selected: f.selected === undefined ? "" : String(f.selected),
       silent: f.silent === undefined ? "" : String(f.silent),
+      listUndated: f.listUndated === undefined ? "" : String(f.listUndated),
     });
     setDialog("override");
   };
@@ -368,7 +369,7 @@ export default function ContentItem({ loaderData }: Route.ComponentProps) {
           if (fields.scoreMode === "none") next.score = null;
           else if (fields.scoreMode === "value") next.score = Number(fields.score);
           else if (c.override?.fields.score !== undefined) clear.push("score");
-          for (const k of ["selected", "silent"] as const) {
+          for (const k of ["selected", "silent", "listUndated"] as const) {
             if (fields[k] === "true" || fields[k] === "false") next[k] = fields[k] === "true";
             else if (c.override?.fields[k] !== undefined) clear.push(k);
           }
@@ -410,6 +411,13 @@ export default function ContentItem({ loaderData }: Route.ComponentProps) {
               <option value="true">静默（入选也不推送）</option>
               <option value="false">取消静默</option>
             </Select>
+          </Field>
+          <Field label="无发布时间的内容">
+            <Select value={fields.listUndated} onChange={(e) => setFields({ ...fields, listUndated: e.target.value })}>
+              <option value="">按默认规则</option>
+              <option value="true">允许出现在全部动态和搜索</option>
+            </Select>
+            <p className="mt-1 text-xs text-ink-3">仍须通过内容审核；保留回填状态，不会因此入选精选。</p>
           </Field>
         </div>
       </ReasonDialog>

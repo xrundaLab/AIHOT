@@ -65,6 +65,26 @@ async function get(url: string, headers: Record<string, string> = {}) {
   return { status: res.statusCode, body: res.body, etag: res.headers.etag as string | undefined };
 }
 
+test("editor may list an undated archive in search without selecting it; the decision survives rebuild and can be cleared", async () => {
+  const id = await article();
+  await sql`UPDATE articles SET published_at = NULL, backfill = true, backfill_reason = 'unknown-publication-time', grouping_status = 'complete' WHERE id = ${id}`;
+  await publishArticle(id);
+  let [p] = await sql`SELECT eligible, selected, backfill FROM publications WHERE article_id = ${id}`;
+  assert.equal(p!.eligible, false);
+  await overrideFields(id, { fields: { listUndated: true }, version: 0, reason: "reviewed undated article" }, "test");
+  await publishArticle(id);
+  [p] = await sql`SELECT eligible, selected, backfill FROM publications WHERE article_id = ${id}`;
+  assert.deepEqual([p!.eligible, p!.selected, p!.backfill], [true, false, true]);
+  const q = `SUMMARY-${n}-${T}`;
+  const search = JSON.parse((await get(`/api/site/pool?q=${encodeURIComponent(q)}`)).body);
+  assert.ok(search.items.some((item: { id: string }) => item.id === id));
+  assert.equal((await sql`SELECT count(*)::int AS n FROM selected_ledger WHERE article_id = ${id}`)[0]!.n, 0);
+  await overrideFields(id, { fields: {}, clear: ["listUndated"], version: 1, reason: "remove exception" }, "test");
+  [p] = await sql`SELECT eligible, selected FROM publications WHERE article_id = ${id}`;
+  assert.deepEqual([p!.eligible, p!.selected], [false, false]);
+  assert.equal((await sql`SELECT count(*)::int AS n FROM pool_search WHERE article_id = ${id}`)[0]!.n, 0);
+});
+
 // Failure modes: a revoked score falls back to the erroneous model score, zero is treated as
 // missing, republishing loses a correction, invalid scores or stale edits alter public state,
 // or removing a correction cannot restore the saved model result without paying again.

@@ -36,6 +36,11 @@ export function isPoolEligible(input: {
   return input.participationMode === "editorial" && input.relevance === "pass" && !!input.title && (!!input.summary || input.originalPost === true);
 }
 
+/** An editor may list an undated historical item without changing its historical status. */
+export function isListedByDate(input: { backfill: boolean; publishedAt: Date | null; releasedAt?: Date | null; listUndated: boolean }): boolean {
+  return !input.backfill || input.publishedAt !== null || !!input.releasedAt || (input.publishedAt === null && input.listUndated);
+}
+
 /**
  * Item detail page (and its Markdown export): every unwithdrawn item from an editorial source has one,
  * with or without a Chinese summary (noindex unless indexable). hot_signal material is heat evidence
