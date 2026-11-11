@@ -1,7 +1,7 @@
 import { SITE } from "@aihot/site";
 import { useState, type ReactNode } from "react";
 import { Link } from "react-router";
-import { CATEGORY_KEYS, CATEGORY_LABELS } from "@aihot/contracts/taxonomy";
+import { ACTIVE_CATEGORY_KEYS, CATEGORY_LABELS, type CategoryKey } from "@aihot/contracts/taxonomy";
 import type { Route } from "./+types/content-item";
 import type { AdminContentChain, AdminPresentationRefresh } from "@aihot/contracts/admin";
 import { adminGet } from "../../lib/admin.server";
@@ -382,7 +382,10 @@ export default function ContentItem({ loaderData }: Route.ComponentProps) {
           <Field label="栏目">
             <Select value={fields.category} onChange={(e) => setFields({ ...fields, category: e.target.value })}>
               <option value="">不修正</option>
-              {CATEGORY_KEYS.map((k) => <option key={k} value={k}>{CATEGORY_LABELS[k]}</option>)}
+              {fields.category && !ACTIVE_CATEGORY_KEYS.includes(fields.category as CategoryKey) && (
+                <option value={fields.category} disabled>{CATEGORY_LABELS[fields.category as CategoryKey] ?? fields.category}（历史栏目）</option>
+              )}
+              {ACTIVE_CATEGORY_KEYS.map((k) => <option key={k} value={k}>{CATEGORY_LABELS[k]}</option>)}
             </Select>
           </Field>
           <Field label="标签（逗号分隔）"><Input value={fields.tags} onChange={(e) => setFields({ ...fields, tags: e.target.value })} /></Field>
