@@ -4,21 +4,18 @@
 
 ## 去哪里交流
 
-- [Issues](https://github.com/KKKKhazix/AIHOT/issues/new/choose)：可复现的 Bug 和有明确场景的功能建议。
-- [部署与使用问答](https://github.com/KKKKhazix/AIHOT/discussions/categories/q-a)：安装、配置、部署和使用问题；问题解决后可以标记答案。
-- [想法交流](https://github.com/KKKKhazix/AIHOT/discussions/categories/ideas)：先讨论方向和使用场景。
-- [作品展示](https://github.com/KKKKhazix/AIHOT/discussions/categories/show-and-tell)：分享你搭建的行业热点站和实践经验。
+- [Issues](https://github.com/xrundaLab/AIHOT/issues)：部署和使用问题、可复现的 Bug 和功能建议。
 - 安全漏洞请按 [安全报告说明](SECURITY.md) 私密提交。
 
 ## 贡献范围
 
-优先欢迎部署体验、通用采集能力、处理流程、公开接口、可访问性、文档和可复现故障的改进。大幅调整架构或产品行为前，先在 Issue 或讨论区说明场景和方案，避免投入后才发现方向不合适。
+优先欢迎部署体验、通用采集能力、处理流程、公开接口、可访问性、文档和可复现故障的改进。大幅调整架构或产品行为前，先在 Issue 中说明场景和方案，避免投入后才发现方向不合适。
 
 只适合你所在行业的信源和精选标准，在自己的仓库里改 `industry/`；站名、品牌和页面改 `site/`；只有你的站需要的功能做成模块放进 `modules/`（见 [架构](docs/architecture.md#模块)）。步骤参考 [定制文档](docs/customize.md)。出于合规和风险考虑，完整运营信源名单暂不分享；本仓库也不持续维护微博、小红书等平台的专用采集适配，可以按 [信源文档](docs/sources.md) 接入你自行维护的外部采集结果。
 
 ## 提交改动
 
-1. Fork 本仓库，从最新的 `main` 创建自己的分支。若只是搭建一个独立站点，可以用 [Use this template](https://github.com/KKKKhazix/AIHOT/generate)；模板生成的项目没有共享提交历史，后续贡献代码或合并上游更新更适合用 Fork。
+1. Fork 本仓库，从最新的 `main` 创建自己的分支。若只是搭建一个独立站点，可以用 [Use this template](https://github.com/xrundaLab/AIHOT/generate)；模板生成的项目没有共享提交历史，后续向本仓库贡献代码更适合用 Fork。
 2. 阅读 [AGENTS.md](AGENTS.md) 和改动对应的文档。保持一次 PR 解决一个清楚的问题，不夹带无关重构，也不夹带重装依赖带来的 `package-lock.json` 改动。依赖升级、Agent 规则文件（`AGENTS.md`、`CLAUDE.md`、`.agents/`、`.claude/`）和二进制文件不接受外部 PR 修改，需要时先开 Issue，由维护者来改。
 3. 按 [部署文档](docs/deploy.md) 配置本地环境。使用独立测试库，开发时关闭采集、模型调用和外部推送；不使用生产数据库或真实付费服务做测试。
 4. 验证改动涉及的行为，在 PR 中写明运行结果；来自 Fork 的 CI 要维护者批准后才运行，不能代替本地检查。代码改动执行 `npm run typecheck`、`npm test`、网页构建与网页测试；后端测试库名必须以 `_test` 或 `_ci` 结尾（没有会自动创建并迁移），每个测试文件在它的副本上并行运行，所以测试数据库账号要有 `CREATEDB` 权限。运行中的站点可用 `node scripts/smoke.ts --base http://localhost:3000` 检查。纯文档或模板改动核对链接、语法和实际展示即可，不需要为了凑数量新增测试。

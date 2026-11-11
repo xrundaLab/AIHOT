@@ -27,7 +27,7 @@
   <a href="#make-it-your-field">Make it your field</a> ·
   <a href="#how-it-works">How it works</a> ·
   <a href="#documentation">Documentation</a> ·
-  <a href="https://github.com/KKKKhazix/AIHOT/discussions">Discussions</a>
+  <a href="https://github.com/xrundaLab/AIHOT/issues">Issues</a>
 </p>
 
 <br>
@@ -109,14 +109,14 @@ The same thing happens once: the official site posts it, ten outlets repeat it, 
 
 ## Run it
 
-To create your own independent site, click [Use this template](https://github.com/KKKKhazix/AIHOT/generate) and clone the repository it creates. To keep merging upstream updates or to contribute, fork it instead. The commands below are for trying it out directly.
+To create your own independent site, click [Use this template](https://github.com/xrundaLab/AIHOT/generate) and clone the repository it creates. To contribute to this repository, fork it instead. The commands below are for trying it out directly.
 
 You need [Docker](https://docs.docker.com/get-started/get-docker/), [Node.js 24](https://nodejs.org/en/download) (to run `init-env`, which generates the configuration), and an API key for any OpenAI-compatible model API (DeepSeek, Qwen, Zhipu GLM and so on).
 
 `init-env` configures DeepSeek by default. For another provider, change `LLM_BASE_URL`, `LLM_MODEL` and `LLM_EXTRA_JSON` in `.env`, following the examples in `.env.example`. With a reasoning model (one that thinks before answering), also set `LLM_REASONING_TOKENS` to leave output room for the reasoning.
 
 ```bash
-git clone https://github.com/KKKKhazix/AIHOT.git myhot
+git clone https://github.com/xrundaLab/AIHOT.git myhot
 cd myhot
 node scripts/init-env.ts --llm-key <your model API key>
 docker compose up -d --build
@@ -172,9 +172,9 @@ Stack: Node.js 24 · TypeScript · React Router (server-side rendering) · Fasti
 
 ## Community and contributing
 
-Questions about deploying and using it go to [Q&A](https://github.com/KKKKhazix/AIHOT/discussions/categories/q-a), new ideas to [Ideas](https://github.com/KKKKhazix/AIHOT/discussions/categories/ideas), and you're welcome to share the news site you built for your field in [Show and tell](https://github.com/KKKKhazix/AIHOT/discussions/categories/show-and-tell). Writing in English is fine.
+For deployment questions and ideas, use [Issues](https://github.com/xrundaLab/AIHOT/issues). Writing in English is fine.
 
-For a bug or a concrete feature request, [open an issue](https://github.com/KKKKhazix/AIHOT/issues/new/choose). Before changing code, read the [contributing guide](CONTRIBUTING.md); report security vulnerabilities through the [private reporting channel](SECURITY.md).
+For a bug or a concrete feature request, [open an issue](https://github.com/xrundaLab/AIHOT/issues/new/choose). Before changing code, read the [contributing guide](CONTRIBUTING.md); report security vulnerabilities through the [private reporting channel](SECURITY.md).
 
 ## Finally
 

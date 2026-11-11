@@ -27,7 +27,7 @@
   <a href="docs/customize.md">改成你的行业</a> ·
   <a href="#它是怎么工作的">它是怎么工作的</a> ·
   <a href="#文档">文档</a> ·
-  <a href="https://github.com/KKKKhazix/AIHOT/discussions">社区交流</a>
+  <a href="https://github.com/xrundaLab/AIHOT/issues">问题反馈</a>
 </p>
 
 <br>
@@ -108,14 +108,14 @@
 
 ## 跑起来
 
-想创建自己的独立站点，可以先点 [Use this template](https://github.com/KKKKhazix/AIHOT/generate)，再克隆你生成的仓库。想持续合并上游更新或贡献代码，建议先 Fork。下面的命令适合直接试用。本仓库的默认 Compose 配置用于 EduHOT；独立试用需要显式指定 `docker-compose.standalone.yml`。
+想创建自己的独立站点，可以先点 [Use this template](https://github.com/xrundaLab/AIHOT/generate)，再克隆你生成的仓库。想向本仓库贡献代码，建议先 Fork。下面的命令适合直接试用。本仓库的默认 Compose 配置用于 EduHOT；独立试用需要显式指定 `docker-compose.standalone.yml`。
 
 需要 [Docker](https://docs.docker.com/get-started/get-docker/)、[Node.js 24](https://nodejs.org/en/download)（运行 `init-env` 生成配置要用），和一个 OpenAI 兼容的模型 API Key（DeepSeek、千问、智谱都可以）。
 
 `init-env` 默认按 DeepSeek 配置。用千问、智谱等别家，照 `.env.example` 里的例子改 `.env` 的 `LLM_BASE_URL`、`LLM_MODEL` 和 `LLM_EXTRA_JSON`；用推理模型（先想再答）时，还要设 `LLM_REASONING_TOKENS` 给推理留出输出额度。
 
 ```bash
-git clone https://github.com/KKKKhazix/AIHOT.git myhot
+git clone https://github.com/xrundaLab/AIHOT.git myhot
 cd myhot
 node scripts/init-env.ts --llm-key <你的模型 API Key>
 docker compose -f docker-compose.standalone.yml up -d --build
@@ -168,9 +168,9 @@ docker compose -f docker-compose.standalone.yml up -d --build
 
 ## 交流与贡献
 
-部署和使用问题到 [问答区](https://github.com/KKKKhazix/AIHOT/discussions/categories/q-a)，新想法到 [想法交流区](https://github.com/KKKKhazix/AIHOT/discussions/categories/ideas)，欢迎在 [作品展示区](https://github.com/KKKKhazix/AIHOT/discussions/categories/show-and-tell) 分享你做出的行业热点站。
+部署、使用问题和新想法可以在 [Issues](https://github.com/xrundaLab/AIHOT/issues) 中交流。
 
-发现 Bug 或有明确的功能建议，可以 [提交 Issue](https://github.com/KKKKhazix/AIHOT/issues/new/choose)。准备改代码前，先看 [贡献说明](CONTRIBUTING.md)；安全漏洞请走 [私密报告入口](SECURITY.md)。
+发现 Bug 或有明确的功能建议，可以 [提交 Issue](https://github.com/xrundaLab/AIHOT/issues/new/choose)。准备改代码前，先看 [贡献说明](CONTRIBUTING.md)；安全漏洞请走 [私密报告入口](SECURITY.md)。
 
 ## 最后
 
