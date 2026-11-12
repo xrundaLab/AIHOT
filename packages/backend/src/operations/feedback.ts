@@ -12,6 +12,7 @@ import { sql, type Db } from "../db.ts";
 import { audit } from "../audit.ts";
 import { serverModules } from "../modules.ts";
 import { feishuInternalEnabled, forwardFeedbackToFeishu } from "../notify/feishu.ts";
+import { loadItemDetail } from "../publication/detail.ts";
 
 export class FeedbackRejected extends Error {
   readonly status: number;
@@ -200,4 +201,24 @@ export async function forwardPendingFeedback(): Promise<{ sent: number; failed: 
     }
   }
   return { sent, failed };
+}
+
+/** Record the vote before asking for an optional note. The random ID authorizes only that note. */
+export async function recordArticleReview(articleId: string, vote: "up" | "down", ip: string, userAgent: string) {
+  if ((await loadItemDetail(articleId)).kind !== "found") return { kind: "not_found" } as const;
+  const source = feedbackSourceHash(ip, userAgent);
+  return sql.begin(async (tx) => {
+    await tx`SELECT pg_advisory_xact_lock(hashtextextended(${source}, 0))`;
+    const [recent] = await tx<{ n: number }[]>`SELECT count(*)::int AS n FROM article_reviews WHERE source_hash = ${source} AND created_at > now() - interval '1 hour'`;
+    if (recent!.n >= 30) return { kind: "limited" } as const;
+    const id = randomUUID();
+    await tx`INSERT INTO article_reviews (id, article_id, vote, source_hash) VALUES (${id}, ${articleId}, ${vote}, ${source})`;
+    return { kind: "created", id } as const;
+  });
+}
+
+export async function addArticleReviewNote(articleId: string, id: string, note: string) {
+  const rows = await sql`UPDATE article_reviews SET note = ${note.trim() || null}
+    WHERE id = ${id} AND article_id = ${articleId} AND created_at > now() - interval '1 day' RETURNING id`;
+  return rows.length > 0;
 }

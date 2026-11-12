@@ -208,7 +208,7 @@ export async function contentChain(id: string): Promise<Chain | null> {
            s.name AS source_name, s.kind AS source_kind, s.tier, s.participation_mode, s.site_fulltext, s.syndicate_fulltext
     FROM articles a JOIN sources s ON s.id = a.source_id WHERE a.id = ${id}`;
   if (!article) return null;
-  const [discoveries, revisions, analyses, publication, override, ledger, membership, decisions, deliveries, history] = await Promise.all([
+  const [discoveries, revisions, analyses, publication, override, ledger, membership, decisions, deliveries, history, reviews] = await Promise.all([
     sql<Chain["discoveries"]>`SELECT source_id, via, discovered_at FROM article_discoveries WHERE article_id = ${id} ORDER BY discovered_at`,
     sql<Chain["revisions"]>`SELECT revision, title, content_hash, created_at FROM article_revisions WHERE article_id = ${id} ORDER BY revision DESC LIMIT 10`,
     sql<Chain["analyses"]>`
@@ -226,8 +226,9 @@ export async function contentChain(id: string): Promise<Chain | null> {
     sql<Chain["decisions"]>`SELECT verdict, fact_id, story_id, receipt_id, candidates, created_at FROM grouping_decisions WHERE article_id = ${id} ORDER BY created_at DESC LIMIT 5`,
     sql<Chain["deliveries"]>`SELECT target_key, dedupe_key, status, attempts, response, created_at, sent_at FROM deliveries WHERE subject_id = ${id} ORDER BY created_at DESC`,
     auditHistory(`content:${id}`),
+    sql<Chain["reviews"]>`SELECT id, vote, note, created_at FROM article_reviews WHERE article_id = ${id} ORDER BY created_at DESC`,
   ]);
-  return { article, discoveries, revisions, analyses, publication: publication[0] ?? null, override: override[0] ?? null, ledger, membership, decisions, deliveries, history };
+  return { article, discoveries, revisions, analyses, publication: publication[0] ?? null, override: override[0] ?? null, ledger, membership, decisions, deliveries, history, reviews };
 }
 
 /** Whether the current hot ranking shows the article: as an event's representative or among its reports. */

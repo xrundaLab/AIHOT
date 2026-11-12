@@ -20,6 +20,7 @@ import { StoryFollowups } from "../features/item/StoryFollowups";
 import { MediaGallery } from "../features/item/MediaGallery";
 import { QuotedPost } from "../features/item/QuotedPost";
 import { ArticleBody } from "../features/item/ArticleBody";
+import { ArticleReview } from "../features/item/ArticleReview";
 import { ActionsSheet, ReaderToolbar, type ActionRow } from "../features/item/ReaderTools";
 import { OutlineSheet } from "../components/ui/OutlineSheet";
 import { scrollToAnchor } from "../lib/motion";
@@ -386,7 +387,7 @@ function ItemView({ item }: { item: SiteItemDetail }) {
         <details className="open:basis-full">
           <summary aria-label="查看评分详情" className="flex h-5 w-5 cursor-pointer list-none items-center justify-center rounded-full border border-line-strong text-[12px] font-semibold text-ink-3 hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">i</summary>
           <div className="mt-2 rounded-control border border-line bg-surface p-3 text-[12px] text-ink-2">
-            <div className="mb-2 font-semibold text-ink">评分详情</div>
+            <div className="mb-2 font-semibold text-ink">评分详情 {item.scoreAnalyzedAt && <time dateTime={item.scoreAnalyzedAt} className="ml-1 font-normal text-ink-4">{fullDateTime(item.scoreAnalyzedAt)}</time>}</div>
             {item.scoreDetails?.length ? item.scoreDetails.map((detail, index) => (
               <div key={index} className="mb-2 last:mb-0">
                 <div className="mb-1 text-ink-3">第 {index + 1} 次评分 · 总分 {detail.total}</div>
@@ -452,6 +453,7 @@ function ItemView({ item }: { item: SiteItemDetail }) {
           </div>
         </RailSection>
       )}
+      <RailSection title="评估效果"><ArticleReview itemId={item.id} /></RailSection>
     </>
   );
 
@@ -593,6 +595,8 @@ function ItemView({ item }: { item: SiteItemDetail }) {
               ))}
             </div>
           )}
+
+          <section className="mt-6 border-t border-line pt-4 lg:hidden"><h2 className="mb-2 text-sm font-semibold">评估效果</h2><ArticleReview itemId={item.id} /></section>
 
           {item.story && <StoryFollowups story={item.story} currentId={item.id} />}
 

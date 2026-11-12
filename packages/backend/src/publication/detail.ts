@@ -21,6 +21,7 @@ interface DetailRow extends ItemRow {
   tr_complete: boolean | null;
   topics: string[];
   score_details: SiteItemDetail["scoreDetails"];
+  score_analyzed_at: Date | null;
 }
 
 export type DetailResult =
@@ -54,7 +55,8 @@ async function loadRow(id: string): Promise<DetailRow | null> {
   const [row] = await sql<DetailRow[]>`
     SELECT ${ITEM_COLUMNS}, a.body_html, a.body_text, a.body_status, tr.body_html AS tr_html, tr.complete AS tr_complete,
       ${topicMembership()} AS topics,
-      (SELECT an.output->'scoreDetails' FROM analyses an WHERE an.id = p.analysis_id) AS score_details
+      (SELECT an.output->'scoreDetails' FROM analyses an WHERE an.id = p.analysis_id) AS score_details,
+      (SELECT an.created_at FROM analyses an WHERE an.id = p.analysis_id AND an.score IS NOT NULL) AS score_analyzed_at
     ${ITEM_FROM}
     WHERE p.article_id = ${id}`;
   return row ?? null;
@@ -163,6 +165,7 @@ export async function loadItemDetail(id: string, language: "zh" | "original" = "
   const item: SiteItemDetail = {
     ...summary,
     scoreDetails: row.score_details ?? null,
+    scoreAnalyzedAt: row.score_analyzed_at?.toISOString() ?? null,
     x,
     ...(sameEvent ? { reason: null, sameEvent } : {}),
     readingMode: "full",

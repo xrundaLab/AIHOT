@@ -43,3 +43,40 @@ test("in WeChat, 复制 Markdown copies the article without the async clipboard"
     await web?.stop();
   }
 });
+
+test("article evaluation records a vote before an optional note on desktop and mobile", async () => {
+  const requests: Array<{ method: string; body: unknown }> = [];
+  const api = fakeApi(async (url, _res, req) => {
+    if (url.pathname === "/api/site/items/review-item") return itemDetail({ id: "review-item", title: "评价检查", scoreAnalyzedAt: "2026-10-04T08:00:00.000Z" });
+    if (url.pathname.startsWith("/api/site/items/review-item/reviews")) {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(Buffer.from(chunk));
+      requests.push({ method: req.method!, body: JSON.parse(Buffer.concat(chunks).toString()) });
+      return { id: "test-review", ok: true };
+    }
+  });
+  const browser = await chromium.launch({ channel: "chromium" });
+  let web: WebServer | undefined;
+  try {
+    web = await startWebServer(api);
+    for (const width of [1366, 393]) {
+      const page = await browser.newPage({ viewport: { width, height: 900 } });
+      await visit(page, web.origin + "/items/review-item");
+      await page.getByRole("button", { name: "评价为赞" }).filter({ visible: true }).click();
+      await expect(page.getByRole("dialog", { name: "添加评价备注" })).toBeVisible();
+      assert.deepEqual(requests.at(-1), { method: "POST", body: { vote: "up" } });
+      await page.getByLabel("备注（选填）").fill("有帮助");
+      await page.getByRole("button", { name: "提交备注" }).click();
+      await expect(page.getByText("评价和备注已记录")).toBeVisible();
+      assert.deepEqual(requests.at(-1), { method: "PATCH", body: { note: "有帮助" } });
+      await page.getByRole("button", { name: "评价为踩" }).filter({ visible: true }).click();
+      await expect(page.getByRole("dialog", { name: "添加评价备注" })).toBeVisible();
+      await page.keyboard.press("Escape");
+      assert.deepEqual(requests.at(-1), { method: "POST", body: { vote: "down" } });
+      await page.close();
+    }
+  } finally {
+    await browser.close();
+    await web?.stop();
+  }
+});

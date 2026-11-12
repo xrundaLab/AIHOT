@@ -143,6 +143,7 @@ export interface ScoreDetail {
 
 export interface SiteItemDetail extends ItemSummary {
   scoreDetails?: ScoreDetail[] | null;
+  scoreAnalyzedAt?: string | null;
   /** The post with all its media; its text is the body. */
   x: Omit<XPostView, "text" | "translation"> | null;
   /** Selected, but its fact's seat is held by this report: marked 同事件, without a reason of its own. */

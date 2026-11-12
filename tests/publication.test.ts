@@ -10,7 +10,7 @@ import { marked } from "marked";
 import { after, before, test } from "node:test";
 import { config } from "@aihot/backend/config";
 import { closeDb, sql } from "@aihot/backend/db";
-import { overrideFields, setVisibility } from "@aihot/backend/admin/content";
+import { contentChain, overrideFields, setVisibility } from "@aihot/backend/admin/content";
 import { updateSource } from "@aihot/backend/admin/sources";
 import { upsertMaterial } from "@aihot/backend/content/materials";
 import { stopBoss } from "@aihot/backend/jobs/queue";
@@ -641,4 +641,29 @@ test("a correction between snapshot pages arrives through changes after the fixe
   assert.deepEqual(JSON.parse(changes.body).changes.map((change: { op: string; item: { id: string; title: string } }) =>
     ({ op: change.op, id: change.item.id, title: change.item.title })), [{ op: 'upsert', id, title }],
   'the client applies the correction once after finishing the original snapshot');
+});
+
+
+test("article reviews save the vote immediately and expose optional notes only in diagnostics", async () => {
+  const id = await article();
+  await publishArticle(id, released());
+  const detail = (await app.inject(`/api/site/items/${id}`)).json();
+  const [analysis] = await sql<{ created_at: Date }[]>`SELECT created_at FROM analyses WHERE article_id = ${id}`;
+  assert.equal(detail.scoreAnalyzedAt, analysis!.created_at.toISOString());
+  const url = `/api/site/items/${id}/reviews`;
+  const created = await app.inject({ method: "POST", url, payload: { vote: "down" } });
+  assert.equal(created.statusCode, 201);
+  const reviewId = created.json().id;
+  let chain = await contentChain(id);
+  assert.equal(chain!.reviews[0]!.vote, "down");
+  assert.equal(chain!.reviews[0]!.note, null);
+  const note = await app.inject({ method: "PATCH", url: `${url}/${reviewId}`, payload: { note: "  内容不准确  " } });
+  assert.equal(note.statusCode, 200);
+  chain = await contentChain(id);
+  assert.equal(chain!.reviews[0]!.note, "内容不准确");
+  assert.equal((await app.inject({ method: "PATCH", url: `${url}/${randomUUID()}`, payload: { note: "overwrite" } })).statusCode, 404);
+  assert.equal((await app.inject({ method: "POST", url, payload: { vote: "other" } })).statusCode, 400);
+  assert.equal((await app.inject({ method: "PATCH", url: `${url}/${reviewId}`, payload: { note: "x".repeat(1001) } })).statusCode, 400);
+  assert.equal((await app.inject({ method: "POST", url: "/api/site/items/missing/reviews", payload: { vote: "up" } })).statusCode, 404);
+  assert.equal((await app.inject(`/api/site/items/${id}`)).body.includes("内容不准确"), false);
 });

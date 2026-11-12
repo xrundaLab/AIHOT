@@ -309,6 +309,15 @@ export default function ContentItem({ loaderData }: Route.ComponentProps) {
         </div>
       </div>
 
+      <div className="mt-5">
+        <Card title="人工点评">
+          {c.reviews.length ? <ul className="space-y-3">{c.reviews.map((review) => <li key={review.id}>
+            <div className="text-ink-2">{review.vote === "up" ? "赞" : "踩"} <span className="text-ink-4">· {bj(review.created_at)}</span></div>
+            {review.note && <p className="mt-1 whitespace-pre-wrap break-words text-ink-3">{review.note}</p>}
+          </li>)}</ul> : <Empty>暂无人工点评</Empty>}
+        </Card>
+      </div>
+
       <ReasonDialog
         open={dialog === "seo"}
         title={p?.indexable ? "取消搜索收录" : "标记为可收录"}

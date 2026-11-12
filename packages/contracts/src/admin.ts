@@ -229,6 +229,7 @@ export interface AdminContentChain {
   decisions: Array<{ verdict: string; fact_id: number | null; story_id: number | null; receipt_id: number | null; candidates: unknown; created_at: Timestamp }>;
   deliveries: Array<{ target_key: string; dedupe_key: string; status: string; attempts: number; response: string | null; created_at: Timestamp; sent_at: Timestamp | null }>;
   history: AdminAuditEntry[];
+  reviews: Array<{ id: string; vote: "up" | "down"; note: string | null; created_at: Timestamp }>;
 }
 
 // Feedback
