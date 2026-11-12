@@ -57,3 +57,19 @@ test("试跑标签必须具有模型可见的原文证据，且两种标签分�
   });
   assert.deepEqual(groundedLabels({ matchingTags: [{ tag: "AI课堂", quote: "前句 后句" }], detailTags: [] }, ["前句", "后句"], "前句 后句").matchingTags, []);
 });
+
+test("模型返回匹配标签编号时按字典转换，保留原文证据并按名称去重", async () => {
+  const { groundedLabels } = await import("./evidence.ts");
+  assert.deepEqual(groundedLabels({ matchingTags: [{ tag: "N035", quote: "开源项目可用于学习" }], detailTags: [] }, "开源项目可用于学习", "开源项目可用于学习").matchingTags, [{ tag: "开源AI应用", quote: "开源项目可用于学习" }]);
+  const result = groundedLabels({
+    matchingTags: [
+      { tag: "N035", quote: "开源项目可用于学习" },
+      { tag: "开源AI应用", quote: "开源项目可用于学习" },
+      { tag: "N031", quote: "原文不存在" },
+      { tag: "N999", quote: "开源项目可用于学习" },
+    ],
+    detailTags: [{ tag: "N035", quote: "开源项目可用于学习" }],
+  }, "开源项目可用于学习", "开源项目可用于学习");
+  assert.deepEqual(result, { matchingTags: [{ tag: "开源AI应用", quote: "开源项目可用于学习" }], detailTags: [] });
+  assert.deepEqual(mapTopics(result.matchingTags.map(item => item.tag), []), ["C1"]);
+});
