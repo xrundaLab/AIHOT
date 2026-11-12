@@ -442,6 +442,17 @@ function ItemView({ item }: { item: SiteItemDetail }) {
           </div>
         </RailSection>
       )}
+      {!!item.topicMatches?.length && (
+        <RailSection title="主题匹配标签">
+          <div className="flex flex-wrap gap-1.5">
+            {item.topicMatches.map(({ tag, topic }) => (
+              <Link viewTransition key={`${topic.slug}:${tag}`} to={`/topics/${topic.slug}`} className="chip" title={`归入${topic.name}`}>
+                #{tag}
+              </Link>
+            ))}
+          </div>
+        </RailSection>
+      )}
       {item.tags.length > 0 && (
         <RailSection title="标签">
           <div className="flex flex-wrap gap-1.5">
@@ -593,6 +604,18 @@ function ItemView({ item }: { item: SiteItemDetail }) {
                   #{t}
                 </Link>
               ))}
+            </div>
+          )}
+          {!!item.topicMatches?.length && (
+            <div className="mt-3 lg:hidden">
+              <h2 className="mb-2 text-sm font-semibold">主题匹配标签</h2>
+              <div className="flex flex-wrap gap-1.5">
+                {item.topicMatches.map(({ tag, topic }) => (
+                  <Link viewTransition key={`${topic.slug}:${tag}`} to={`/topics/${topic.slug}`} className="chip" title={`归入${topic.name}`}>
+                    #{tag}
+                  </Link>
+                ))}
+              </div>
             </div>
           )}
 

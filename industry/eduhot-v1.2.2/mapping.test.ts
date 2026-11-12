@@ -73,3 +73,12 @@ test("模型返回匹配标签编号时按字典转换，保留原文证据并�
   assert.deepEqual(result, { matchingTags: [{ tag: "开源AI应用", quote: "开源项目可用于学习" }], detailTags: [] });
   assert.deepEqual(mapTopics(result.matchingTags.map(item => item.tag), []), ["C1"]);
 });
+
+test("AI内容辨识的证据须明确涉及未成年人", async () => {
+  const { groundedLabels } = await import("./evidence.ts");
+  const body = "平台使用算法识别AI生成内容。青少年学习辨别AI生成的图片。";
+  const rejected = groundedLabels({ matchingTags: [{ tag: "N012", quote: "平台使用算法识别AI生成内容" }], detailTags: [] }, body, body);
+  assert.deepEqual(rejected.matchingTags, []);
+  const accepted = groundedLabels({ matchingTags: [{ tag: "N012", quote: "青少年学习辨别AI生成的图片" }], detailTags: [] }, body, body);
+  assert.deepEqual(accepted.matchingTags, [{ tag: "AI内容辨识", quote: "青少年学习辨别AI生成的图片" }]);
+});

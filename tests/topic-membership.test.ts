@@ -7,7 +7,8 @@ import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import { closeDb, sql } from "@aihot/backend/db";
 import { findTopic, loadTopicPage, topicMembership, TOPICS } from "@aihot/backend/publication/topics";
-import { searchContent } from "@aihot/backend/admin/content";
+import { contentChain, searchContent } from "@aihot/backend/admin/content";
+import { loadItemDetail } from "@aihot/backend/publication/detail";
 
 after(closeDb);
 
@@ -82,4 +83,14 @@ test("V1.2.2 topic membership is isolated from legacy and detail labels", async 
   assert.deepEqual(oldMemberships.find(row => row.id.endsWith("-new"))?.topics, []);
   assert.equal(TOPICS.some(topic => topic.slug === "v122-e1"), false);
   assert.ok((await searchContent("", true)).some(row => row.id === `${prefix}-internal`));
+  const detail = await loadItemDetail(`${prefix}-new`, "zh", new Date("2026-01-02"));
+  assert.equal(detail.kind, "found");
+  if (detail.kind !== "found") throw new Error("missing detail");
+  assert.deepEqual((detail.item as any).topicMatches.map((match: any) => match.tag), matchingTags);
+  const internal = await loadItemDetail(`${prefix}-internal`, "zh", new Date("2026-01-02"));
+  assert.equal(internal.kind, "found");
+  if (internal.kind !== "found") throw new Error("missing detail");
+  assert.deepEqual((internal.item as any).topicMatches, []);
+  const chain = await contentChain(`${prefix}-internal`);
+  assert.deepEqual((chain!.analyses[0] as any).topic_matches, [{ tag: "编辑资料检索", quote: "证据" }]);
 });

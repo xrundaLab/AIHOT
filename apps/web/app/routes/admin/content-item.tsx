@@ -163,6 +163,14 @@ export default function ContentItem({ loaderData }: Route.ComponentProps) {
                       </div>
                       {an.title_zh && <div className="mt-2 font-medium text-ink">{an.title_zh}</div>}
                       {an.reason_zh && <div className="mt-1 text-[12.5px] leading-relaxed text-ink-3">{an.reason_zh}</div>}
+                      {an.topic_matches?.length ? (
+                        <div className="mt-2 text-[12px] text-ink-3">
+                          <div className="font-medium">主题匹配标签与原文依据</div>
+                          <ul className="mt-1 space-y-1">
+                            {an.topic_matches.map(({ tag, quote }, index) => <li key={`${tag}:${index}`}>{tag}：{quote}</li>)}
+                          </ul>
+                        </div>
+                      ) : null}
                       {an.score_details?.length ? (
                         <div className="mt-2 space-y-1 text-[12px] text-ink-3">
                           {an.score_details.map((d, index) => (
@@ -468,6 +476,7 @@ export default function ContentItem({ loaderData }: Route.ComponentProps) {
       <ReasonDialog
         open={dialog === "extract"}
         title="重新抽取正文"
+        description="用于更新原网页正文；正文未变化时可能复用已有评估。要重新生成标签，请使用重新评估。"
         requireReason={false}
         confirmLabel="重新抽取"
         busy={pending === "extract"}

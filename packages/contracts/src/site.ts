@@ -156,6 +156,8 @@ export interface SiteItemDetail extends ItemSummary {
   relatedStories: StoryRef[];
   /** The topics the report belongs to. */
   topics: TopicLink[];
+  /** Public topic-matching labels; internal editorial labels are excluded. */
+  topicMatches?: Array<{ tag: string; topic: TopicLink }>;
   indexable: boolean;
   markdownAvailable: boolean;
   group: GroupInfo | null;

@@ -9,6 +9,8 @@ const matching = new Set(standard.matchingTags.map((entry) => entry.name));
 const matchingNames = new Map(standard.matchingTags.map((entry) => [entry.id, entry.name]));
 const details = new Set(standard.detailTags.map((entry) => entry.name));
 const normalize = (value: string) => value.replace(/\s+/gu, " ").trim();
+// N012 requires the young person's identity in the same quote; a generic platform detection is not evidence.
+const youngPerson = /未成年|青少年|儿童|孩子|小学生|中学生|高中生|初中生|幼儿|少儿|中小学生|\b(?:children|child|teenagers?|teens?|adolescents?|minors?|kids?)\b/iu;
 
 /** Accept only allowed labels with quotes present in both the original and the model input. */
 export function groundedLabels(result: { matchingTags: Label[]; detailTags: Label[] }, original: string | readonly string[], visible: string) {
@@ -20,6 +22,7 @@ export function groundedLabels(result: { matchingTags: Label[]; detailTags: Labe
       const evidence = normalize(quote);
       const name = aliases.get(tag.trim()) ?? tag.trim();
       if (!allowed.has(name) || seen.has(name) || !evidence || !sources.some((source) => source.includes(evidence)) || !input.includes(evidence)) return [];
+      if (allowed === matching && name === "AI内容辨识" && !youngPerson.test(evidence)) return [];
       seen.add(name);
       return [{ tag: name, quote: evidence }];
     });

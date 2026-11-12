@@ -80,3 +80,28 @@ test("article evaluation records a vote before an optional note on desktop and m
     await web?.stop();
   }
 });
+
+test("topic matching labels appear separately on desktop and mobile", async () => {
+  const api = fakeApi((url) => url.pathname === "/api/site/items/topic-labels" ? itemDetail({
+    id: "topic-labels", title: "主题匹配标签检查", tags: ["平台规则"],
+    topics: [{ slug: "v122-b4", name: "家庭数字安全与权益" }],
+    topicMatches: [{ tag: "家庭平台权益", topic: { slug: "v122-b4", name: "家庭数字安全与权益" } }],
+  }) : undefined);
+  const browser = await chromium.launch({ channel: "chromium" });
+  let web: WebServer | undefined;
+  try {
+    web = await startWebServer(api);
+    for (const width of [1366, 393]) {
+      const page = await browser.newPage({ viewport: { width, height: 900 } });
+      await visit(page, web.origin + "/items/topic-labels");
+      const label = page.getByRole("link", { name: "#家庭平台权益" }).filter({ visible: true });
+      await expect(label).toBeVisible();
+      await expect(label).toHaveAttribute("href", "/topics/v122-b4");
+      await expect(page.getByRole("link", { name: "#平台规则" }).filter({ visible: true })).toBeVisible();
+      await page.close();
+    }
+  } finally {
+    await browser.close();
+    await web?.stop();
+  }
+});

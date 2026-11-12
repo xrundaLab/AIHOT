@@ -11,7 +11,7 @@ import { exportTranslation, isChineseBody, ITEM_COLUMNS, ITEM_FROM, seatHolders,
 import { evidenceCondition, listedCondition } from "./scope.ts";
 import { itemUrl, siteUrl } from "./links.ts";
 import { hasItemPage, publicSourceName } from "./rules.ts";
-import { topicLinks, topicMembership } from "./topics.ts";
+import { TOPICS, topicLinks, topicMembership } from "./topics.ts";
 
 interface DetailRow extends ItemRow {
   body_html: string | null;
@@ -20,6 +20,7 @@ interface DetailRow extends ItemRow {
   tr_html: string | null;
   tr_complete: boolean | null;
   topics: string[];
+  topic_matches: Array<{ tag: string }> | null;
   score_details: SiteItemDetail["scoreDetails"];
   score_analyzed_at: Date | null;
 }
@@ -30,7 +31,7 @@ export type DetailResult =
 
 export interface V1ItemDetailResponse {
   schemaVersion: 1;
-  item: Omit<SiteItemDetail, "links" | "category" | "indexable" | "markdownAvailable" | "scoreDetails"> & {
+  item: Omit<SiteItemDetail, "links" | "category" | "indexable" | "markdownAvailable" | "scoreDetails" | "topicMatches"> & {
     links: { aihot: string; original: string };
     category: PublicApiCategoryKey | null;
     attribution: { name: string; url: string };
@@ -55,6 +56,7 @@ async function loadRow(id: string): Promise<DetailRow | null> {
   const [row] = await sql<DetailRow[]>`
     SELECT ${ITEM_COLUMNS}, a.body_html, a.body_text, a.body_status, tr.body_html AS tr_html, tr.complete AS tr_complete,
       ${topicMembership()} AS topics,
+      (SELECT an.output->'structureV122'->'matchingTags' FROM analyses an WHERE an.id = p.analysis_id AND an.output->'structureV122'->>'version' = '1.2.2') AS topic_matches,
       (SELECT an.output->'scoreDetails' FROM analyses an WHERE an.id = p.analysis_id) AS score_details,
       (SELECT an.created_at FROM analyses an WHERE an.id = p.analysis_id AND an.score IS NOT NULL) AS score_analyzed_at
     ${ITEM_FROM}
@@ -111,6 +113,7 @@ export async function loadItemDetail(id: string, language: "zh" | "original" = "
       outline: [],
       relatedStories: [],
       topics: [],
+      topicMatches: [],
       indexable: false,
       markdownAvailable: false,
       group: null,
@@ -174,6 +177,10 @@ export async function loadItemDetail(id: string, language: "zh" | "original" = "
     outline: reading.outline,
     relatedStories: related,
     topics: topicLinks(row.topics),
+    topicMatches: (Array.isArray(row.topic_matches) ? row.topic_matches : []).flatMap(({ tag }) => {
+      const topic = TOPICS.find((t) => row.topics.includes(t.slug) && t.tags.includes(tag));
+      return topic ? [{ tag, topic: { slug: topic.slug, name: topic.name } }] : [];
+    }),
     indexable: row.indexable,
     markdownAvailable: markdownAvailable(row),
     group,
