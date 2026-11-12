@@ -32,6 +32,7 @@ export interface Topic {
   pattern: string | null;
   /** Companies: what a whole search query may call it. */
   aliases: string[];
+  version?: "1.2.2";
 }
 
 interface TopicFile {
@@ -53,9 +54,7 @@ function titlePattern(name: string, entityId: string): string {
 
 const file = JSON.parse(readFileSync(path.join(REPO_ROOT, "industry/topics.json"), "utf8")) as TopicFile;
 
-export const TOPIC_GROUPS: TopicGroup[] = file.groups;
-
-export const TOPICS: Topic[] = file.topics.map((t) => ({
+const legacyTopics: Topic[] = file.topics.map((t) => ({
   slug: t.slug,
   name: t.name,
   group: t.group,
@@ -66,7 +65,23 @@ export const TOPICS: Topic[] = file.topics.map((t) => ({
   aliases: t.entityId ? [t.slug, t.name, ...nameParts(t.name), ...(t.aliases ?? [])] : [],
 }));
 
-const BY_SLUG = new Map(TOPICS.map((t, position) => [t.slug, { topic: t, position }]));
+const standard = JSON.parse(readFileSync(path.join(REPO_ROOT, "industry/eduhot-v1.2.2/standard.json"), "utf8")) as {
+  topics: Array<{ id: string; name: string; definition: string; internal: boolean }>;
+  matchingTags: Array<{ name: string; topic: string }>;
+};
+export const TOPIC_GROUPS: TopicGroup[] = [
+  { key: "v122-a", name: "孩子的学习与成长", blurb: "学习、教育与青少年成长" },
+  { key: "v122-b", name: "家长与家庭生活", blurb: "家庭生活、照护与权益" },
+  { key: "v122-c", name: "科技应用与创造", blurb: "工具应用与家庭创作" },
+  { key: "v122-d", name: "社会变化与未来", blurb: "文化、媒介与职业变化" },
+];
+export const TOPICS: Topic[] = standard.topics.filter((t) => !t.internal).map((t) => ({
+  slug: `v122-${t.id.toLowerCase()}`, name: t.name, group: `v122-${t.id[0]!.toLowerCase()}`,
+  definition: t.definition, entityId: null, pattern: null, aliases: [], version: "1.2.2",
+  tags: standard.matchingTags.filter((tag) => tag.topic === t.id).map((tag) => tag.name),
+}));
+const allTopics = [...TOPICS, ...legacyTopics];
+const BY_SLUG = new Map(allTopics.map((t, position) => [t.slug, { topic: t, position }]));
 
 export function findTopic(slug: string): Topic | null {
   return BY_SLUG.get(slug)?.topic ?? null;
@@ -84,27 +99,31 @@ export function topicBrowseLinks() {
 }
 
 /** One membership rule for topic discovery and a single topic's page and count. */
-function topicMatch(tags: ReturnType<typeof sql>, pattern: ReturnType<typeof sql>) {
-  return sql`p.tags && ${tags} AND (${pattern} IS NULL OR p.title ~* ${pattern} OR coalesce(p.original_title, '') ~* ${pattern}
-    OR (SELECT count(*) FROM unnest(p.tags) AS e(tag) WHERE e.tag LIKE 'entity:%') = 1)`;
+function topicMatch(tags: ReturnType<typeof sql>, pattern: ReturnType<typeof sql>, version: ReturnType<typeof sql>) {
+  return sql`CASE WHEN ${version} = '1.2.2' THEN EXISTS (
+    SELECT 1 FROM analyses va, jsonb_array_elements(COALESCE(va.output->'structureV122'->'matchingTags', '[]'::jsonb)) label
+    WHERE va.id = p.analysis_id AND va.output->'structureV122'->>'version' = '1.2.2' AND label->>'tag' = ANY(${tags})
+  ) ELSE NOT EXISTS (SELECT 1 FROM analyses va WHERE va.id = p.analysis_id AND va.output->'structureV122'->>'version' = '1.2.2')
+    AND p.tags && ${tags} AND (${pattern} IS NULL OR p.title ~* ${pattern} OR coalesce(p.original_title, '') ~* ${pattern}
+    OR (SELECT count(*) FROM unnest(p.tags) AS e(tag) WHERE e.tag LIKE 'entity:%') = 1) END`;
 }
 
 /**
  * The topics report `p` belongs to, in topic order: its tags meet the topic's and, for a company, the
  * title names it or it is the report's only subject company.
  */
-export function topicMembership(topics: Topic[] = TOPICS) {
-  const rows = topics.map((t) => ({ slug: t.slug, tags: t.tags, pattern: t.pattern, position: position(t.slug) }));
+export function topicMembership(topics: Topic[] = allTopics) {
+  const rows = topics.map((t) => ({ slug: t.slug, tags: t.tags, pattern: t.pattern, version: t.version ?? null, position: position(t.slug) }));
   return sql`ARRAY(
-    SELECT t.slug FROM jsonb_to_recordset(${sql.json(rows)}::jsonb) AS t(slug text, tags text[], pattern text, position int)
-    WHERE ${topicMatch(sql`t.tags`, sql`t.pattern`)}
+    SELECT t.slug FROM jsonb_to_recordset(${sql.json(rows)}::jsonb) AS t(slug text, tags text[], pattern text, version text, position int)
+    WHERE ${topicMatch(sql`t.tags`, sql`t.pattern`, sql`t.version`)}
     ORDER BY t.position)`;
 }
 
 /** Report `p` is in topic `t`; the tag overlap comes first, for the tags index. */
 function inTopic(t: Topic) {
   const pattern: ReturnType<typeof sql> = t.pattern === null ? sql`NULL::text` : sql`${t.pattern}::text`;
-  return topicMatch(sql`${t.tags}::text[]`, pattern);
+  return topicMatch(sql`${t.tags}::text[]`, pattern, sql`${t.version ?? null}::text`);
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -173,7 +192,7 @@ interface TopicIndex {
 }
 
 /** The full index or a bounded set of its candidates, with their current content and membership. */
-async function readSeats(now: Date, ids?: string[], topics: Topic[] = TOPICS): Promise<TopicMember[]> {
+async function readSeats(now: Date, ids?: string[], topics: Topic[] = allTopics): Promise<TopicMember[]> {
   const rows = await sql<SeatRow[]>`
     WITH seats AS (
       SELECT p.article_id AS id, p.revision, p.timeline_at AS at, p.visible_after AS released, p.title, p.score, (s.tier = 'T1') AS first_party,
@@ -204,7 +223,7 @@ async function readSeats(now: Date, ids?: string[], topics: Topic[] = TOPICS): P
 
 async function readIndex(now: Date): Promise<TopicIndex> {
   const members = (await readSeats(now)).filter((seat) => seat.topics.length > 0);
-  const bySlug = new Map(TOPICS.map((t) => [t.slug, [] as TopicMember[]]));
+  const bySlug = new Map(allTopics.map((t) => [t.slug, [] as TopicMember[]]));
   for (const seat of members) for (const slug of seat.topics) bySlug.get(slug)?.push(seat);
   const parts = serverModules().flatMap((m) => (m.topics?.page?.index ? [{ name: m.name, index: m.topics.page.index }] : []));
   return { at: now, bySlug, modules: new Map(await Promise.all(parts.map(async (p) => [p.name, await p.index(members, now)] as const))) };
@@ -342,7 +361,7 @@ export async function loadTopicPage(slug: string, page: number, now?: Date): Pro
     companyBrands(),
     currentSeats(recheck, at, [topic]),
   ]);
-  const groupName = TOPIC_GROUPS.find((g) => g.key === topic.group)?.name ?? "";
+  const groupName = [...TOPIC_GROUPS, ...file.groups].find((g) => g.key === topic.group)?.name ?? "";
   return {
     topic: { ...summarize(topic, seats, index.at, brands, live), groupName, poolTotal: pool },
     modules: Object.fromEntries(parts.map((part) => [part.name, part.part(live)])),

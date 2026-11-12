@@ -27,7 +27,7 @@ const provider = await stub((_hit, req) => {
     step === "prefilter" ? { label: "PASS", reason: "测试" }
     : step === "score" ? scoreFixture(SELECTING_SCORE)
     : step === "understand" ? { itemType: "education_event", authorRole: "principal", tags: ["产品更新"], editorialJudgment: "理由", titleZh: "一个模型的标题", summaryZh: "一个模型写的摘要。第二句。" }
-    : step === "structure" ? { category: "ai-products", tags: ["产品更新"], subjects: [], fact: null }
+    : step === "structure" ? { matchingTags: [], detailTags: [], category: null, tags: ["产品更新"], subjects: [], fact: null }
     : "title_zh: 标题\nsummary_zh: 摘要。";
   return { id: `stub-${seen.length}`, choices: [{ message: { content: typeof content === "string" ? content : JSON.stringify(content) } }], usage: { prompt_tokens: 1, completion_tokens: 1 } };
 });

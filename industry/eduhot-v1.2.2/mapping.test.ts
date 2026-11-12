@@ -40,3 +40,20 @@ test("试跑提示词展开完整字典", async () => {
   assert.match(prompt, /探索线索/);
   assert.doesNotMatch(prompt, /\{\{(?:categories|matchingTags|detailTags)\}\}/);
 });
+
+test("试跑标签必须具有模型可见的原文证据，且两种标签分别保存", async () => {
+  const { groundedLabels } = await import("./evidence.ts");
+  const output = groundedLabels({
+    matchingTags: [
+      { tag: "青少年AI使用", quote: "学生使用AI练习" },
+      { tag: "家长AI应用", quote: "家长使用AI" },
+      { tag: "AI辅助学习", quote: "未发送的后文" },
+    ],
+    detailTags: [{ tag: "学生", quote: "学生使用AI练习" }, { tag: "未成年人保护", quote: "不存在的内容" }],
+  }, "学生使用AI练习。未发送的后文", "学生使用AI练习。");
+  assert.deepEqual(output, {
+    matchingTags: [{ tag: "青少年AI使用", quote: "学生使用AI练习" }],
+    detailTags: [{ tag: "学生", quote: "学生使用AI练习" }],
+  });
+  assert.deepEqual(groundedLabels({ matchingTags: [{ tag: "AI课堂", quote: "前句 后句" }], detailTags: [] }, ["前句", "后句"], "前句 后句").matchingTags, []);
+});

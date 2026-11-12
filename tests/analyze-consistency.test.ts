@@ -21,7 +21,7 @@ const provider = await stub(async (_hit, request) => {
   }
   const content = step === "prefilter" ? { label: "PASS", reason: "local fixture" }
     : step === "score" ? scoreFixture(SELECTING_SCORE)
-    : step === "structure" ? { category: "ai-models", tags: [], subjects: [], scope: "single", fact: null }
+    : step === "structure" ? { matchingTags: [], detailTags: [], category: null, tags: [], subjects: [], scope: "single", fact: null }
     : { itemType: "education_event", authorRole: "principal", tags: ["模型发布"], editorialJudgment: "模型能力提升", titleZh: "实验室发布新模型", summaryZh: "实验室发布新模型，并公布了评测结果与价格。" };
   return { choices: [{ message: { content: JSON.stringify(content) } }] };
 });

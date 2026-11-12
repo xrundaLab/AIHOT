@@ -34,6 +34,8 @@ import { CATEGORY_GUIDE, CATEGORY_TAGS, ENTITIES, ENTITY_TAGS, ITEM_TYPES, norma
 import { promptText, promptVersion } from "./prompts.ts";
 import { originalPostCopy } from "../content/posts.ts";
 import { wordingProblems } from "./wording.ts";
+import { buildPrompt as buildV122Prompt } from "../../../../industry/eduhot-v1.2.2/prompt.ts";
+import { groundedLabels } from "../../../../industry/eduhot-v1.2.2/evidence.ts";
 
 export { buildMaterial, loadAnalyzeInput, type AnalyzeInputArticle };
 
@@ -42,7 +44,7 @@ export const PROMPT_VERSIONS = {
   score: `${promptVersion("selection-score")}-weights@${createHash("sha256").update(JSON.stringify(SCORE_WEIGHTS)).digest("hex").slice(0, 10)}`,
   understand: promptVersion("understand"),
   summarize: promptVersion("summarize-article", "summarize-article-empty", "summarize-short-post", "summarize-short-post-quoted", "summarize-long-post", "summarize-long-post-quoted", "identity-context"),
-  structure: promptVersion("structure"),
+  structure: `${promptVersion("structure")}-v122@${createHash("sha256").update(buildV122Prompt()).digest("hex").slice(0, 10)}`,
   wording: promptVersion("mend-wording"),
 } as const;
 /** Every step's prompt, as stored on each judgement. */
@@ -151,6 +153,14 @@ export const StructureSchema = z.object({
   })).max(32).default([]),
   subjects: z.array(z.string()).max(6).catch([]),
   fact: FactSchema,
+  matchingTags: z.array(z.object({ tag: z.string(), quote: z.string() })).max(52).optional(),
+  detailTags: z.array(z.object({ tag: z.string(), quote: z.string() })).max(40).optional(),
+});
+
+const StructureV122Schema = StructureSchema.extend({
+  category: z.enum(["news", "policy", "product", "research", "method", "resource", "opinion"]).nullable(),
+  matchingTags: z.array(z.object({ tag: z.string(), quote: z.string() })).max(52),
+  detailTags: z.array(z.object({ tag: z.string(), quote: z.string() })).max(40),
 });
 
 const UnderstandSchema = z.object({
@@ -168,7 +178,7 @@ const SummarizeSchema = z.object({ titleZh: z.string(), summaryZh: z.string(), b
 const ZH_COUNT = ["零", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十", "十一", "十二"];
 
 /** The structure step owns the public category and tags, as well as grouping evidence (filled from the pack's vocabulary). */
-export const STRUCTURE_SYSTEM = promptText("structure", {
+const LEGACY_STRUCTURE_SYSTEM = promptText("structure", {
   categoryCount: ZH_COUNT[ACTIVE_CATEGORIES.length] ?? String(ACTIVE_CATEGORIES.length),
   categoryGuide: CATEGORY_GUIDE,
   categoryTags: ACTIVE_CATEGORIES.map((c) => c.label).join("、"),
@@ -176,6 +186,10 @@ export const STRUCTURE_SYSTEM = promptText("structure", {
   entityTags: ENTITY_TAGS.join("、"),
   entities: Object.entries(ENTITIES).map(([id, e]) => `${id}（${e.aliases.slice(0, 3).join("/")}）`).join("，"),
 });
+
+export const STRUCTURE_SYSTEM = `${buildV122Prompt().replace(/只输出 JSON：[\s\S]*$/u, "")}
+${LEGACY_STRUCTURE_SYSTEM.slice(LEGACY_STRUCTURE_SYSTEM.indexOf("三、"), LEGACY_STRUCTURE_SYSTEM.lastIndexOf("只输出一个 JSON 对象"))}
+只输出一个 JSON 对象，字段必须为 category、matchingTags、detailTags、subjects、scope、fact。matchingTags 和 detailTags 均为 {"tag":"标签名","quote":"正文连续原文"} 的数组；没有证据时为 []。没有主体时 subjects 为 []。不得省略数组。`;
 
 /** Keep only quotes present both in the original material and in the text the structure model saw. */
 export function normalizeStructure(data: z.infer<typeof StructureSchema>, a: AnalyzeInputArticle) {
@@ -200,6 +214,9 @@ export function normalizeStructure(data: z.infer<typeof StructureSchema>, a: Ana
   };
   const tags = normalizeTags(data.tags);
   const activeCategory = ACTIVE_CATEGORIES.find((c) => c.key === data.category);
+  const labels = data.matchingTags && data.detailTags ? groundedLabels(
+    { matchingTags: data.matchingTags, detailTags: data.detailTags }, originals, visible,
+  ) : null;
   const categoryTags = CATEGORY_TAGS as readonly string[];
   // A tag is public only when the model supplied an exact quote from the source. Keep the
   // model's ordering (the prompt asks for strongest matches first), then cap secondary tags.
@@ -208,13 +225,13 @@ export function normalizeStructure(data: z.infer<typeof StructureSchema>, a: Ana
     .filter((tag) => !categoryTags.includes(tag))
     .filter((tag) => grounded(evidence.get(tag)))
     .slice(0, 3);
-  const publicTags = activeCategory
+  const publicTags = labels ? [...(activeCategory ? [activeCategory.label] : []), ...labels.detailTags.map((item) => item.tag)] : activeCategory
     ? [activeCategory.label, ...supportedTags]
     : supportedTags;
   return {
     category: data.category, tags: publicTags,
     subjects: [...new Set(data.subjects.map((s) => s.trim().toLowerCase()).filter((s) => s in ENTITIES))],
-    scope, fact,
+    scope, fact, ...(labels ? { structureV122: { version: "1.2.2" as const, materialStatus: a.xPost ? "post" : a.bodyText && a.bodyStatus === "ok" ? "full" : "excerpt", ...labels } } : {}),
   };
 }
 
@@ -354,10 +371,10 @@ export async function runStructure(a: AnalyzeInputArticle, opts: StepOpts = {}):
     subject: subjectOf(a),
     promptVersion: PROMPT_VERSIONS.structure,
     system: STRUCTURE_SYSTEM,
-    user: buildMaterial(a),
-    schema: StructureSchema,
+    user: `材料状态：${a.xPost ? "原始帖子" : a.bodyText && a.bodyStatus === "ok" ? "已确认正文" : "摘要或未确认正文，证据不完整，不得视作全文"}\n${buildMaterial(a)}`,
+    schema: StructureV122Schema,
     temperature: 0.2,
-    maxTokens: 4096,
+    maxTokens: 8192,
     attemptTag: tagged(opts.attemptTag, "structure"),
   });
   return { ...normalizeStructure(res.data, a), model: res.model, receiptId: res.receiptId, reused: res.reused };
@@ -573,6 +590,7 @@ export function normalizeAnalysis(run: AnalysisRun) {
     reasonZh: run.writing?.reasonZh ?? null,
     scope: run.structure?.scope ?? "unknown",
     fact: run.structure?.fact ?? null,
+    structureV122: run.structure?.structureV122 ?? null,
   };
 }
 
@@ -607,7 +625,7 @@ export async function analyzeArticle(articleId: string, opts: StepOpts = {}): Pr
     scores: out.scores, scoreDetails: run.scores?.details ?? null, scoreModel: out.scoreModel, threshold: out.threshold, ...(out.scoreRefused ? { scoreRefused: true } : {}),
     ...(w ? { writer: w.kind, writerModel: w.model, itemType: w.itemType ?? null, authorRole: w.authorRole ?? null } : {}),
     ...(w?.identityGuard?.outcome === "fallback" ? { identityGuard: w.identityGuard } : {}),
-    scope: out.scope, fact: out.fact,
+    scope: out.scope, fact: out.fact, ...(out.structureV122 ? { structureV122: out.structureV122 } : {}),
   };
   const committed = await sql.begin(async (tx) => {
     const [current] = await tx<{ revision: number }[]>`SELECT revision FROM articles WHERE id = ${articleId} FOR UPDATE`;

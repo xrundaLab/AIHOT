@@ -15,7 +15,7 @@ const provider = await stub((_hit, request) => {
   steps.push(step);
   const output = step === "prefilter" ? { label, reason: "fixture" }
     : step === "score" ? scoreFixture(SELECTING_SCORE)
-    : step === "structure" ? { scope: "unknown", category: "model", tags: [], subjects: [], fact: null }
+    : step === "structure" ? { matchingTags: [], detailTags: [], scope: "unknown", category: null, tags: [], subjects: [], fact: null }
     : { itemType: "education_event", authorRole: "principal", titleZh: "模型发布", summaryZh: "来源确认模型发布。", bodyZh: "来源确认模型发布。", tags: [], editorialJudgment: "fixture" };
   return { choices: [{ message: { content: JSON.stringify(output) } }] };
 });

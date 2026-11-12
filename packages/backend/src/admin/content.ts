@@ -182,7 +182,12 @@ export async function searchContent(q: string, editorialCases = false): Promise<
            p.visibility, p.selected, p.score
     FROM articles a JOIN sources s ON s.id = a.source_id LEFT JOIN publications p ON p.article_id = a.id
     WHERE ${where} ORDER BY a.discovered_at DESC, a.id LIMIT 50`;
-  if (editorialCases) return read(sql`p.tags && ${["内容工作流", "创作者案例拆解", "内容运营方法"]}::text[]`);
+  if (editorialCases) return read(sql`EXISTS (
+      SELECT 1 FROM analyses v, jsonb_array_elements(coalesce(v.output->'structureV122'->'matchingTags', '[]'::jsonb)) label
+      WHERE v.id = p.analysis_id AND v.output->'structureV122'->>'version' = '1.2.2'
+        AND label->>'tag' = ANY(${["AI创作流程", "创作者实测", "内容质检", "内容运营复盘", "编辑资料检索"]}::text[])
+    ) OR (NOT EXISTS (SELECT 1 FROM analyses v WHERE v.id = p.analysis_id AND v.output->'structureV122'->>'version' = '1.2.2')
+      AND p.tags && ${["内容工作流", "创作者案例拆解", "内容运营方法"]}::text[])`);
   if (!term) return [];
   // Exact lookups use the identity indexes; a title search must not force a full-table join for an ID.
   if (ARTICLE_ID_PATTERN.test(term)) {

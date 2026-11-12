@@ -6,7 +6,8 @@ import { tag } from "./setup.ts";
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import { closeDb, sql } from "@aihot/backend/db";
-import { findTopic, loadTopicPage, topicMembership } from "@aihot/backend/publication/topics";
+import { findTopic, loadTopicPage, topicMembership, TOPICS } from "@aihot/backend/publication/topics";
+import { searchContent } from "@aihot/backend/admin/content";
 
 after(closeDb);
 
@@ -49,4 +50,36 @@ test("topic lists and pool counts share the exact membership predicate", async (
     assert.equal(page.topic.poolTotal, visible.length, `${topic.slug} pool`);
     assert.deepEqual(page.items.map(row => row.id).sort(), visible.filter(row => row.selected !== false).map(row => row.id).sort(), `${topic.slug} selected`);
   }
+});
+
+test("V1.2.2 topic membership is isolated from legacy and detail labels", async () => {
+  const prefix = `v122-membership-${tag()}`;
+  const at = new Date("2026-01-01T00:00:00Z");
+  await sql`INSERT INTO sources (id, name, kind, tier) VALUES (${prefix}, ${prefix}, 'rss', 'T1')`;
+  const matchingTags = ["AI课堂", "AI辅助学习", "青少年AI使用", "家长AI应用"];
+  for (const kind of ["new", "old", "detail", "internal"] as const) {
+    const id = `${prefix}-${kind}`;
+    await sql`INSERT INTO articles (id, source_id, identity_key, url, title, discovered_at, timeline_at)
+      VALUES (${id}, ${prefix}, ${id}, ${`https://example.org/${id}`}, ${id}, ${at}, ${at})`;
+    const tags = kind === "new" ? matchingTags : kind === "internal" ? ["编辑资料检索"] : [];
+    const output = kind !== "old" ? { structureV122: { version: "1.2.2", matchingTags: tags.map(tag => ({ tag, quote: "证据" })) } } : {};
+    const [analysis] = await sql<{ id: number }[]>`INSERT INTO analyses (article_id, input_revision, origin, output)
+      VALUES (${id}, 1, 'model', ${sql.json(output)}) RETURNING id`;
+    await sql`INSERT INTO publications (article_id, analysis_id, source_id, title, url, discovered_at, timeline_at,
+      sort_at, visible_after, selected, eligible, visibility, channel, tags)
+      VALUES (${id}, ${analysis!.id}, ${prefix}, ${id}, ${`https://example.org/${id}`}, ${at}, ${at}, ${at}, ${at}, true, true, 'public', 'news', ${["AI辅助学习", "学习方法"]})`;
+  }
+  const newTopics = ["v122-a1", "v122-a2", "v122-a3", "v122-b1"].map(slug => findTopic(slug)!);
+  const memberships = await sql<{ id: string; topics: string[] }[]>`
+    SELECT p.article_id AS id, ${topicMembership(newTopics)} AS topics FROM publications p WHERE p.source_id = ${prefix}`;
+  assert.deepEqual(memberships.find(row => row.id.endsWith("-new"))?.topics, newTopics.map(t => t.slug));
+  assert.deepEqual(memberships.find(row => row.id.endsWith("-old"))?.topics, []);
+  assert.deepEqual(memberships.find(row => row.id.endsWith("-detail"))?.topics, []);
+  const legacy = findTopic("family-priority-4")!;
+  const oldMemberships = await sql<{ id: string; topics: string[] }[]>`
+    SELECT p.article_id AS id, ${topicMembership([legacy])} AS topics FROM publications p WHERE p.source_id = ${prefix}`;
+  assert.deepEqual(oldMemberships.find(row => row.id.endsWith("-old"))?.topics, [legacy.slug]);
+  assert.deepEqual(oldMemberships.find(row => row.id.endsWith("-new"))?.topics, []);
+  assert.equal(TOPICS.some(topic => topic.slug === "v122-e1"), false);
+  assert.ok((await searchContent("", true)).some(row => row.id === `${prefix}-internal`));
 });
