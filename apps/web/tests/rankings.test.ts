@@ -15,7 +15,7 @@ after(async () => { await browser?.close(); await web?.stop(); });
 for (const width of [393, 1200]) test(`rankings search and selection at ${width}px`, async () => {
   const page = await browser.newPage({ viewport: { width, height: 850 } });
   try {
-    await visit(page, `${web.origin}/rankings`);
+    await visit(page, `${web.origin}/rankings?board=family%3A48`);
     const article = page.getByRole("link", { name: "家友动态", exact: true });
     await expect(article).toBeVisible();
     await expect(article).toHaveAttribute("href", "/items/example");
@@ -53,5 +53,19 @@ for (const [id, status, title] of [["fixture:pending", "判断中，原始榜单
     await expect(page.getByText(status!)).toBeVisible();
     await expect(page.getByText(title!)).toBeVisible();
     await expect(page.getByText("本次未识别到直接相关内容。")).toHaveCount(0);
+  } finally { await page.close(); }
+});
+
+for (const width of [393, 1200]) test(`radar groups only matching A judgements at ${width}px`, async () => {
+  const page = await browser.newPage({ viewport: { width, height: 850 } });
+  try {
+    await visit(page, `${web.origin}/rankings`);
+    const card = page.getByRole("region", { name: "豚榜 · 全网热搜总榜" });
+    await expect(card.getByText("测试热点")).toBeVisible();
+    await expect(card.getByText("其他线索")).toHaveCount(0);
+    await expect(page.getByText("未判断标题")).toHaveCount(0);
+    await card.getByRole("link", { name: "查看完整榜单 →" }).click();
+    await expect(page).toHaveURL(/board=tunbang/);
+    await expect(page.getByText("其他线索")).toBeVisible();
   } finally { await page.close(); }
 });
