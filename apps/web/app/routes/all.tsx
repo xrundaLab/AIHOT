@@ -28,9 +28,10 @@ export async function loader({ request }: Route.LoaderArgs) {
   const q = url.searchParams.get("q")?.trim().slice(0, 200) || null;
   const tab = url.searchParams.get("tab") === "relevance" ? "relevance" : null;
   // Older deep-paging parameters (deep, anchorAt) still open a normal page.
+  const sort = url.searchParams.get("sort") === "published" ? "published" : null;
   const page = Math.min(Math.max(Number.parseInt(url.searchParams.get("page") ?? "1", 10) || 1, 1), 50);
   const data = await loadOr404<PoolResponse>(
-    listPath("/api/site/pool", { ...filterParams(readFilters(url.searchParams)), q, tab, page: page > 1 ? page : null }),
+    listPath("/api/site/pool", { ...filterParams(readFilters(url.searchParams)), q, tab, sort, page: page > 1 ? page : null }),
     // The busy page keeps the search, so it can be tried again as it was.
     { signal: request.signal, busyRedirect: `/all/search-busy${url.search}` },
   );
@@ -73,7 +74,13 @@ export default function AllPage() {
   const f = data.filters;
   const busy = navigation.state === "loading" && navigation.location?.pathname === "/all";
   const { channel, category } = filterParams(f);
-  const keep = { channel, category };
+  const keep = { channel, category, sort: f.sort === "published" ? "published" : null };
+  const sortHref = (sort: "collected" | "published") => {
+    const sp = new URLSearchParams(params);
+    sp.delete("page");
+    if (sort === "published") sp.set("sort", sort); else sp.delete("sort");
+    return `/all?${sp}`;
+  };
   const searchTabHref = (tab: "time" | "relevance") => {
     const sp = new URLSearchParams(params);
     sp.delete("page");
@@ -154,6 +161,8 @@ export default function AllPage() {
         </div>
       )}
 
+      {f.tab === "time" && <div className="mb-3 flex items-center gap-3"><span className="text-[13px] text-ink-4">排序</span><PillTabs size="xs" layoutId="all-time-sort" label="时间排序" active={f.sort} items={[{ key: "collected", label: "最近收录", to: sortHref("collected") }, { key: "published", label: "原文发布", to: sortHref("published") }]} /></div>}
+
       <div className={`transition-opacity duration-200 ${busy ? "opacity-50" : ""}`}>
         {data.items.length === 0 ? (
           <div className="mt-2 lg:card">
@@ -171,7 +180,7 @@ export default function AllPage() {
             </EmptyState>
           </div>
         ) : (
-          <DayList items={data.items} todayCount={f.q ? null : data.todayCount} />
+          <DayList items={data.items} sort={f.sort} todayCount={f.q || f.tab === "relevance" ? null : data.todayCount} />
         )}
       </div>
       <Pagination page={data.page} pageCount={data.pageCount} href={(p) => pageHref(params, p)} />

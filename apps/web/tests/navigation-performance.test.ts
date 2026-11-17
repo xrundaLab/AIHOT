@@ -52,7 +52,7 @@ const api=fakeApi((url,res,req)=>{
   }
   if(p==='/api/site/pool'){
     const page=Number(url.searchParams.get('page')||1);
-    return {filters:{channel:'all',category:null,tag:null,q:null,tab:'time'},items:[{...item,title:'全部第 '+page+' 页'}],page,pageCount:3,total:3,todayCount:1,freshness:at};
+    return {filters:{channel:'all',category:null,tag:null,q:null,tab:'time',sort:url.searchParams.get('sort')==='published'?'published':'collected'},items:[{...item,title:'全部第 '+page+' 页'}],page,pageCount:3,total:3,todayCount:1,freshness:at};
   }
   if(p==='/api/site/items/navigation-fixture')return detail;
   if(p==='/api/site/items/navigation-fixture/original')return {...detail,body:{zh:null,original:'<p>Original fixture</p>',zhKind:null,complete:true},bodyLanguage:'original'};

@@ -5,26 +5,37 @@ import { useMemo } from "react";
 import type { FeedItemSummary } from "@aihot/contracts/site";
 import { IconChevronRight } from "../../components/icons";
 import { beijingDate } from "@aihot/contracts/time";
-import { byBeijingDay } from "../../lib/format";
 import { markRead, useReadSet } from "../../lib/local-state";
 import { DayHeader, TimelineSlot } from "./Timeline";
 import { FeedItem } from "./FeedItem";
 
-export function DayList({ items, todayCount = null, headerAside, showAllTags = false }: { items: FeedItemSummary[]; todayCount?: number | null; headerAside?: React.ReactNode; showAllTags?: boolean }) {
+export function DayList({ items, todayCount = null, headerAside, showAllTags = false, sort }: { items: FeedItemSummary[]; todayCount?: number | null; headerAside?: React.ReactNode; showAllTags?: boolean; sort?: "collected" | "published" }) {
   const readSet = useReadSet();
   const today = beijingDate(Date.now());
-  const days = useMemo(() => byBeijingDay(items, (it) => it.timelineAt), [items]);
+  const getAt = (it: FeedItemSummary) => sort === "published" ? it.publishedAt : sort === "collected" ? it.discoveredAt : it.timelineAt;
+  const days = useMemo(() => {
+    const groups: Array<{ day: string; entries: FeedItemSummary[] }> = [];
+    for (const it of items) {
+      const at = getAt(it);
+      const day = at ? beijingDate(at) : "unknown";
+      const last = groups.at(-1);
+      if (last?.day === day) last.entries.push(it); else groups.push({ day, entries: [it] });
+    }
+    return groups;
+  }, [items, sort]);
   return (
     <div>
       {days.map(({ day, entries: list }, i) => (
-        <section key={day} aria-label={day}>
-          <DayHeader day={day} today={today} count={day === today ? todayCount : null} aside={i === 0 ? headerAside : undefined} />
+        <section key={`${day}-${i}`} aria-label={day === "unknown" ? "原文发布时间未知" : day}>
+          {day === "unknown" ? <h2 className="py-4 text-ink-3">原文发布时间未知</h2> : <DayHeader day={day} today={today} count={day === today ? todayCount : null} aside={i === 0 ? headerAside : undefined} />}
           <ol className="lg:pt-1">
-            {list.map((it) => (
-              <TimelineSlot key={it.id} at={it.timelineAt}>
-                <FeedItem item={it} read={readSet.has(it.id)} onOpen={markRead} showTags showAllTags={showAllTags} at={it.timelineAt} />
-              </TimelineSlot>
-            ))}
+            {list.map((it) => {
+              const at = getAt(it);
+              const timeKnown = !!at && !(sort === "published" && it.publicationTime?.length === 10);
+              return <TimelineSlot key={it.id} at={at ?? undefined} hideTime={!timeKnown}>
+                <FeedItem item={it} read={readSet.has(it.id)} onOpen={markRead} showTags showAllTags={showAllTags} at={timeKnown ? at! : undefined} />
+              </TimelineSlot>;
+            })}
           </ol>
         </section>
       ))}

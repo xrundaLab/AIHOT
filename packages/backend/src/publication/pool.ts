@@ -124,13 +124,14 @@ const poolTotal = cachedByKey((f: TimelineFilters) => JSON.stringify([f.channel,
 export interface PoolQuery extends TimelineFilters {
   q?: string | null;
   tab?: "time" | "relevance";
+  sort?: "collected" | "published";
   page?: number;
   now?: Date;
 }
 
 // Identical searches share their read before taking search capacity.
 const searchPool = sharedSearch(
-  (q: PoolQuery) => JSON.stringify([q.channel, q.category, q.tag, q.q, q.tab, q.page]),
+  (q: PoolQuery) => JSON.stringify([q.channel, q.category, q.tag, q.q, q.tab, q.sort, q.page]),
   queryPool, (q) => !!q.q?.trim(),
 );
 
@@ -142,6 +143,8 @@ async function queryPool(query: PoolQuery, now: Date): Promise<PoolResponse> {
   const page = Math.min(Math.max(query.page ?? 1, 1), POOL_MAX_PAGES);
   const q = query.q?.trim() || null;
   const tab = q && query.tab === "relevance" ? "relevance" : "time";
+  const sort = query.sort === "published" ? "published" : "collected";
+  const sortColumn = sort === "published" ? sql`p.published_at` : sql`p.discovered_at`;
   const terms = q ? searchTerms(q) : [];
   const entityTag = q ? queryEntityTag(q) : null;
   const filters = sql`${channelCondition(query.channel)} ${categoryCondition(query.category)} ${tagCondition(query.tag)}`;
@@ -154,13 +157,13 @@ async function queryPool(query: PoolQuery, now: Date): Promise<PoolResponse> {
   const like = (col: ReturnType<typeof sql>, t: string) => sql`${col} LIKE ${"%" + t + "%"}`;
   const run = async (db: Db) => {
     if (!q) {
-      // Page ids from the timeline index first, then the joins for those rows only.
+      // Page ids from the chosen time index first, then the joins for those rows only.
       const rows = await db<ItemRow[]>`
         WITH page AS (
           SELECT p.article_id FROM publications p WHERE ${listedCondition(now)} ${filters}
-          ORDER BY p.timeline_at DESC, p.article_id DESC LIMIT ${POOL_PAGE_SIZE} OFFSET ${offset})
+          ORDER BY ${sortColumn} DESC NULLS LAST, p.article_id DESC LIMIT ${POOL_PAGE_SIZE} OFFSET ${offset})
         SELECT ${ITEM_COLUMNS} ${ITEM_FROM} WHERE p.article_id IN (SELECT article_id FROM page)
-        ORDER BY p.timeline_at DESC, p.article_id DESC`;
+        ORDER BY ${sortColumn} DESC NULLS LAST, p.article_id DESC`;
       // A fixed clock (tests, replays) never shares cached totals.
       return { rows, total: query.now ? await listedCount(query, now) : await poolTotal(query) };
     }
@@ -209,14 +212,14 @@ async function queryPool(query: PoolQuery, now: Date): Promise<PoolResponse> {
       const rows = result.filter((r): r is ItemRow & { rel: number; total: number } => r.id !== null);
       return { rows, total: Number(result[0]!.total) };
     }
-    // Default search: newest first straight from the timeline index; the total from the pool's
+    // Default search: newest first using the selected time; the total from the pool's
     // search rows, where one- and two-character terms scan a small table instead of every item.
     const rows = await db<ItemRow[]>`
       WITH page AS (
         SELECT p.article_id FROM publications p WHERE ${listedCondition(now)} ${filters} ${matchOrSubject(directMatchCondition(terms))}
-        ORDER BY p.timeline_at DESC, p.article_id DESC LIMIT ${POOL_PAGE_SIZE} OFFSET ${offset})
+        ORDER BY ${sortColumn} DESC NULLS LAST, p.article_id DESC LIMIT ${POOL_PAGE_SIZE} OFFSET ${offset})
       SELECT ${ITEM_COLUMNS} ${ITEM_FROM} WHERE p.article_id IN (SELECT article_id FROM page)
-      ORDER BY p.timeline_at DESC, p.article_id DESC`;
+      ORDER BY ${sortColumn} DESC NULLS LAST, p.article_id DESC`;
     const direct = terms.reduce((acc, t) => sql`${acc} AND ${like(sql`ps.direct`, t)}`, sql``);
     const { n } = one(await db<{ n: number }[]>`
       SELECT count(*) AS n FROM (SELECT 1 FROM pool_search ps JOIN publications p ON p.article_id = ps.article_id
@@ -228,12 +231,12 @@ async function queryPool(query: PoolQuery, now: Date): Promise<PoolResponse> {
   const today = beijingDate(now);
   const meta = one(await sql<{ today_count: number; updated_at: Date | null }[]>`
     SELECT (SELECT count(*) FROM publications p
-      WHERE ${listedCondition(now)} AND p.timeline_at >= ${beijingMidnight(today)} ${filters}) AS today_count,
+      WHERE ${listedCondition(now)} AND ${sortColumn} >= ${beijingMidnight(today)} ${filters}) AS today_count,
       (SELECT max(p.updated_at) FROM publications p WHERE p.eligible) AS updated_at`);
 
   const holders = await seatHolders(rows, now);
   return {
-    filters: { channel: query.channel, category: query.category, tag: query.tag, q, tab },
+    filters: { channel: query.channel, category: query.category, tag: query.tag, q, tab, sort },
     items: rows.map((r) => (holders.has(r.id) ? { ...toFeedItemSummary(r), reason: null, sameEvent: holders.get(r.id)! } : toFeedItemSummary(r))),
     page,
     pageCount: Math.min(POOL_MAX_PAGES, Math.max(1, Math.ceil(total / POOL_PAGE_SIZE))),

@@ -104,3 +104,25 @@ test("equal relevance ranks a seated selected item, then the higher score, then 
   assert.deepEqual(result.items.map(item => item.id), ["tie-selected", "tie-score", "tie-unseated", "tie-new"].map(id));
   assert.equal(result.total, 4);
 });
+
+test("pool sorts by collection or original publication time across pages", async () => {
+  const group = `${T}-sort`;
+  for (let n = 0; n < 42; n++) {
+    await add(`sort-${n}`, group, "", { tags: [group], age: n + 1 });
+    const published = n === 0 ? null : new Date(+now - (100 - n) * 1000);
+    await sql`UPDATE publications SET published_at = ${published} WHERE article_id = ${id(`sort-${n}`)}`;
+  }
+  const base = { channel: "all" as const, category: null, tag: group, now };
+  const collected = await loadPool(base);
+  assert.equal(collected.items[0]?.id, id("sort-0"));
+  const published = await loadPool({ ...base, sort: "published" });
+  assert.equal(published.items[0]?.id, id("sort-41"));
+  const last = await loadPool({ ...base, sort: "published", page: 2 });
+  assert.equal(last.items.at(-1)?.id, id("sort-0"));
+  assert.equal(last.items.at(-1)?.publishedAt, null);
+  assert.ok(collected.items[0]?.discoveredAt);
+  const search = { ...base, q: group };
+  const [searchCollected, searchPublished] = await Promise.all([loadPool(search), loadPool({ ...search, sort: "published" })]);
+  assert.equal(searchCollected.items[0]?.id, id("sort-0"));
+  assert.equal(searchPublished.items[0]?.id, id("sort-41"));
+});
