@@ -1,3 +1,4 @@
+import { DailyHistory } from "./DailyHistory";
 import { RegenerateDaily } from "./RegenerateDaily";
 // One report with a newspaper's structure in the site's own look: a nameplate with its 报眼 (the box
 // beside it for the issue and date), a band of the issue's figures, the front page (the lead, today's
@@ -483,7 +484,7 @@ export function reportOutline(report: ReportDetail): OutlineEntry[] {
   ];
 }
 
-export function ReportPaper({ report, index }: { report: ReportDetail; index: ReportNavigationEntry[] }) {
+export function ReportPaper({ report, index, historical = false }: { report: ReportDetail; index: ReportNavigationEntry[]; historical?: boolean }) {
   const daily = report.kind === "daily";
   const leadStory = leadStoryOf(report);
   const pages = pagesOf(report, leadStory);
@@ -553,8 +554,9 @@ export function ReportPaper({ report, index }: { report: ReportDetail; index: Re
             {daily ? "日报合订本" : `往期${REPORT_NAMES[report.kind]}`}
           </Link>
         </p>
-        {daily && <a className="text-[12px] text-ink-4 hover:text-ink-2" href={`/api/site/reports/daily/${report.key}/markdown`}>下载 Markdown</a>}
-        {daily && <RegenerateDaily date={report.key} generatedAt={report.generatedAt} />}
+        {daily && !historical && <a className="text-[12px] text-ink-4 hover:text-ink-2" href={`/api/site/reports/daily/${report.key}/markdown`}>下载 Markdown</a>}
+        {daily && <DailyHistory date={report.key} historical={historical} generatedAt={report.generatedAt} />}
+        {daily && !historical && <RegenerateDaily date={report.key} generatedAt={report.generatedAt} />}
       </footer>
     </article>
   );

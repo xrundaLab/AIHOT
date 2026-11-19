@@ -332,11 +332,20 @@ async function neighbors(kind: ReportKind, key: string): Promise<{ prev: string 
   return { prev: row?.prev ?? null, next: row?.next ?? null };
 }
 
-export async function loadReport(kind: ReportKind, key: string): Promise<ReportDetail | null> {
+export async function dailyRevisions(key: string) {
+  const rows = await sql<{ revision: number; generated_at: Date }[]>`
+    SELECT v.revision, v.generated_at FROM report_revisions v JOIN reports r ON r.id = v.report_id
+    WHERE r.kind = 'daily' AND r.key = ${key} ORDER BY v.revision DESC`;
+  return rows.map(v => ({ revision: v.revision, generatedAt: v.generated_at.toISOString() }));
+}
+
+export async function loadReport(kind: ReportKind, key: string, revision?: number): Promise<ReportDetail | null> {
   // Its number counts every issue of the kind up to it, as the index numbers them (reportIndexRows).
   const [r] = await sql<(Pick<ReportRow, "content" | "generated_at"> & { issue_number: number })[]>`
-    SELECT r.content, r.generated_at, (SELECT count(*)::int FROM reports earlier WHERE earlier.kind = r.kind AND earlier.key <= r.key) AS issue_number
-    FROM reports r WHERE r.kind = ${kind} AND r.key = ${key}`;
+    SELECT coalesce(v.content, r.content) AS content, coalesce(v.generated_at, r.generated_at) AS generated_at,
+      (SELECT count(*)::int FROM reports earlier WHERE earlier.kind = r.kind AND earlier.key <= r.key) AS issue_number
+    FROM reports r LEFT JOIN report_revisions v ON v.report_id = r.id AND v.revision = ${revision ?? null}
+    WHERE r.kind = ${kind} AND r.key = ${key} AND (${revision === undefined} OR v.revision IS NOT NULL)`;
   if (!r) return null;
   const c = r.content;
   const entries: Array<Record<string, any>> = [

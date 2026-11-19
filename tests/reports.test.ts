@@ -80,3 +80,16 @@ test("daily Markdown includes the issue link and public archive data", async () 
   assert.match(markdown ?? "", /\/daily\/2098-01-16>/);
   assert.equal(await dailyMarkdown("2098-01-17"), null);
 });
+
+test("daily history lists older snapshots and reads the requested revision", async () => {
+  const { dailyRevisions } = await import("@aihot/backend/publication/reports");
+  const date = "2098-01-18";
+  await sql`INSERT INTO reports(kind,key,window_start,window_end,content,generated_at,revision)
+    VALUES('daily',${date},now(),now(),${sql.json({ title: "当前版", sections: [] })},'2098-01-18T03:00:00Z',2)`;
+  await sql`INSERT INTO report_revisions(report_id,revision,content,generated_at)
+    SELECT id,1,${sql.json({ title: "旧版", sections: [] })},'2098-01-18T00:00:00Z' FROM reports WHERE kind='daily' AND key=${date}`;
+  assert.deepEqual(await dailyRevisions(date), [{ revision: 1, generatedAt: "2098-01-18T00:00:00.000Z" }]);
+  assert.equal((await loadReport("daily", date, 1))?.generatedAt, "2098-01-18T00:00:00.000Z");
+  assert.equal((await loadReport("daily", date))?.generatedAt, "2098-01-18T03:00:00.000Z");
+  assert.equal(await loadReport("daily", date, 99), null);
+});

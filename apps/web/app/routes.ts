@@ -23,6 +23,7 @@ export default [
   route("story/:publicId", "routes/story.tsx"),
   route("daily", "routes/report-latest.tsx", { id: "daily-latest" }),
   route("daily/archive", "routes/daily-archive.tsx"),
+  route("daily/:key/history/:revision", "routes/report-detail.tsx", { id: "daily-history" }),
   route("daily/:key", "routes/report-detail.tsx", { id: "daily-detail" }),
   route("weekly", "routes/report-latest.tsx", { id: "weekly-latest" }),
   route("weekly/:key", "routes/report-detail.tsx", { id: "weekly-detail" }),

@@ -25,16 +25,19 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   const kind = kindFromPath(new URL(request.url).pathname);
   const key = params.key ?? "";
   if (!PATTERN[kind].test(key)) throw data({ message: "not_found" }, { status: 404 });
+  const revision = (params as { revision?: string }).revision;
+  const suffix = revision ? `/history/${encodeURIComponent(revision)}` : "";
   const [report, { items: index }] = await Promise.all([
-    loadOr404<ReportDetail>(`/api/site/reports/${kind}/${key}`, { signal: request.signal }),
+    loadOr404<ReportDetail>(`/api/site/reports/${kind}/${key}${suffix}`, { signal: request.signal }),
     apiGet<ReportNavigationResponse>(`/api/site/reports/${kind}/navigation/${key}`, { signal: request.signal }),
   ]);
-  return cachedPage(3600, { report, index, today: beijingDate(Date.now()) });
+  return cachedPage(revision ? 0 : 3600, { report, index, revision, today: beijingDate(Date.now()) });
 }
 
 export function meta({ loaderData }: Route.MetaArgs) {
   if (!loaderData) return [{ title: titled("报告不存在") }, { name: "robots", content: "noindex" }];
   const r = loaderData.report;
+  if (loaderData.revision) return [{ title: titled(`${r.title} · 历史版本`) }, { name: "robots", content: "noindex" }];
   const description = r.lead?.leadParagraph ?? r.overview?.slice(0, 150) ?? `${SITE.name} ${r.key} ${subjectAfter("的", REPORT_NAMES[r.kind])}。`;
   const path = `/${r.kind}/${r.key}`;
   return [...pageMeta({
@@ -48,10 +51,10 @@ export function meta({ loaderData }: Route.MetaArgs) {
 }
 
 export default function ReportDetailPage() {
-  const { report, index, today } = useLoaderData<typeof loader>();
+  const { report, index, today, revision } = useLoaderData<typeof loader>();
   return (
     <ReportLayout kind={report.kind} index={index} current={report.key} today={today} outline={reportOutline(report)}>
-      <ReportPaper report={report} index={index} />
+      <ReportPaper report={report} index={index} historical={!!revision} />
     </ReportLayout>
   );
 }

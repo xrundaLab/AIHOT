@@ -126,6 +126,7 @@ async function composeDailyLocked(date: string, reason?: string, attemptTag?: st
     windowEnd: end.toISOString(),
     generator: { version: review.version, model: review.model, reviewedEvents: review.reviewedEvents, ...edition.stats, ...issue.stats },
     suitability: review.decisions,
+    skippedReviewBatches: review.skippedBatches,
   };
   await saveReport("daily", date, start, end, content, reason, review.model, review.receiptIds);
   return { key: date, entries: issue.main.length };
