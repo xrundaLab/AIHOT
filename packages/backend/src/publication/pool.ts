@@ -9,6 +9,7 @@ import {
 } from "./items.ts";
 import { listedCondition } from "./scope.ts";
 import { TOPICS } from "./topics.ts";
+import { serverModules } from "../modules.ts";
 
 export const POOL_PAGE_SIZE = 40;
 export const POOL_MAX_PAGES = 50;
@@ -112,16 +113,22 @@ export function publicMatchCondition(terms: string[]) {
 }
 
 /** The listed items under the filters, up to the pages the pool offers. */
-async function listedCount(f: TimelineFilters, now: Date): Promise<number> {
+async function listedCount(f: TimelineFilters & { collection?: string | null }, now: Date): Promise<number> {
   return Number(one(await sql<{ n: number }[]>`
     SELECT count(*) AS n FROM (SELECT 1 FROM publications p WHERE ${listedCondition(now)}
-      ${channelCondition(f.channel)} ${categoryCondition(f.category)} ${tagCondition(f.tag)} LIMIT ${POOL_MAX_PAGES * POOL_PAGE_SIZE}) t`).n);
+      ${channelCondition(f.channel)} ${categoryCondition(f.category)} ${tagCondition(f.tag)} ${collectionCondition(f.collection)} LIMIT ${POOL_MAX_PAGES * POOL_PAGE_SIZE}) t`).n);
 }
 
 /** Without a search the total only sets the page count: it is reused for 30 seconds per filter. */
-const poolTotal = cachedByKey((f: TimelineFilters) => JSON.stringify([f.channel, f.category, f.tag]), (f) => listedCount(f, new Date()), { freshMs: 30_000, maxStaleMs: 30_000, maxKeys: 200 });
+const poolTotal = cachedByKey((f: TimelineFilters & { collection?: string | null }) => JSON.stringify([f.channel, f.category, f.tag, f.collection]), (f) => listedCount(f, new Date()), { freshMs: 30_000, maxStaleMs: 30_000, maxKeys: 200 });
+
+function collectionCondition(collection?: string | null) {
+  if (!collection) return sql``;
+  return serverModules().map(m => m.pool?.filter?.(collection)).find(Boolean) ?? sql`AND FALSE`;
+}
 
 export interface PoolQuery extends TimelineFilters {
+  collection?: string | null;
   q?: string | null;
   tab?: "time" | "relevance";
   sort?: "collected" | "published";
@@ -131,7 +138,7 @@ export interface PoolQuery extends TimelineFilters {
 
 // Identical searches share their read before taking search capacity.
 const searchPool = sharedSearch(
-  (q: PoolQuery) => JSON.stringify([q.channel, q.category, q.tag, q.q, q.tab, q.sort, q.page]),
+  (q: PoolQuery) => JSON.stringify([q.channel, q.category, q.tag, q.collection, q.q, q.tab, q.sort, q.page]),
   queryPool, (q) => !!q.q?.trim(),
 );
 
@@ -147,7 +154,7 @@ async function queryPool(query: PoolQuery, now: Date): Promise<PoolResponse> {
   const sortColumn = sort === "published" ? sql`p.published_at` : sql`p.discovered_at`;
   const terms = q ? searchTerms(q) : [];
   const entityTag = q ? queryEntityTag(q) : null;
-  const filters = sql`${channelCondition(query.channel)} ${categoryCondition(query.category)} ${tagCondition(query.tag)}`;
+  const filters = sql`${channelCondition(query.channel)} ${categoryCondition(query.category)} ${tagCondition(query.tag)} ${collectionCondition(query.collection)}`;
   const offset = (page - 1) * POOL_PAGE_SIZE;
   const cap = POOL_MAX_PAGES * POOL_PAGE_SIZE;
 
@@ -174,7 +181,7 @@ async function queryPool(query: PoolQuery, now: Date): Promise<PoolResponse> {
       // can make PostgreSQL scan every toasted body instead. Keep other searches inline so short
       // terms, additional terms and selective publication filters retain their existing plans.
       const splitFields = terms.length === 1 && /[\p{L}\p{N}]{3}/u.test(terms[0]!)
-        && (!query.channel || query.channel === "all") && !query.category && !query.tag;
+        && (!query.channel || query.channel === "all") && !query.category && !query.tag && !query.collection;
       const partScore = terms.reduce(
         (acc, t) => sql`${acc} + (CASE WHEN ${like(sql`ps.direct`, t)} THEN 3 ELSE 0 END) + (CASE WHEN ${like(sql`ps.body`, t)} THEN 1 ELSE 0 END)`,
         sql`0`,
@@ -235,9 +242,14 @@ async function queryPool(query: PoolQuery, now: Date): Promise<PoolResponse> {
       (SELECT max(p.updated_at) FROM publications p WHERE p.eligible) AS updated_at`);
 
   const holders = await seatHolders(rows, now);
+  const annotations = Object.assign({}, ...(await Promise.all(serverModules().flatMap(m => m.pool?.annotate ? [m.pool.annotate(rows.map(r => r.id))] : []))));
   return {
-    filters: { channel: query.channel, category: query.category, tag: query.tag, q, tab, sort },
-    items: rows.map((r) => (holders.has(r.id) ? { ...toFeedItemSummary(r), reason: null, sameEvent: holders.get(r.id)! } : toFeedItemSummary(r))),
+    filters: { channel: query.channel, category: query.category, tag: query.tag, q, tab, sort, collection: query.collection ?? null },
+    items: rows.map((r) => {
+      const item = toFeedItemSummary(r);
+      const note = annotations[r.id];
+      return { ...item, ...(note?.badge ? { badge: note.badge } : {}), ...(note?.sourceName ? { source: { ...item.source, name: note.sourceName } } : {}), ...(holders.has(r.id) ? { reason: null, sameEvent: holders.get(r.id)! } : {}) };
+    }),
     page,
     pageCount: Math.min(POOL_MAX_PAGES, Math.max(1, Math.ceil(total / POOL_PAGE_SIZE))),
     total,

@@ -15,6 +15,7 @@ import { IconSearch } from "../components/icons";
 import { PhoneBar } from "../components/shell/PhoneBar";
 import { isPhone, type Screen } from "../components/shell/screens";
 import { openSearch } from "../features/search/SearchOverlay";
+import { webModules } from "../site-modules";
 import { addRecentSearch } from "../lib/local-state";
 
 export const handle: Screen = { tab: "featured", name: "全部" };
@@ -27,11 +28,12 @@ export async function loader({ request }: Route.LoaderArgs) {
   const url = new URL(request.url);
   const q = url.searchParams.get("q")?.trim().slice(0, 200) || null;
   const tab = url.searchParams.get("tab") === "relevance" ? "relevance" : null;
+  const collection = url.searchParams.get("collection") === "radar" && webModules().some(m => m.name === "rankings") ? "radar" : null;
   // Older deep-paging parameters (deep, anchorAt) still open a normal page.
   const sort = url.searchParams.get("sort") === "published" ? "published" : null;
   const page = Math.min(Math.max(Number.parseInt(url.searchParams.get("page") ?? "1", 10) || 1, 1), 50);
   const data = await loadOr404<PoolResponse>(
-    listPath("/api/site/pool", { ...filterParams(readFilters(url.searchParams)), q, tab, sort, page: page > 1 ? page : null }),
+    listPath("/api/site/pool", { ...filterParams(readFilters(url.searchParams)), q, tab, sort, collection, page: page > 1 ? page : null }),
     // The busy page keeps the search, so it can be tried again as it was.
     { signal: request.signal, busyRedirect: `/all/search-busy${url.search}` },
   );
@@ -44,9 +46,9 @@ export function meta({ loaderData }: Route.MetaArgs) {
   const f = loaderData?.data.filters;
   const q = f?.q;
   const page = loaderData?.data.page ?? 1;
-  const path = listPath("/all", { ...(f && filterParams(f)), q, tab: q && f?.tab === "relevance" ? "relevance" : null, page: page > 1 ? page : null });
+  const path = listPath("/all", { ...(f && filterParams(f)), q, collection: f?.collection, tab: q && f?.tab === "relevance" ? "relevance" : null, page: page > 1 ? page : null });
   const title = `${q ? `搜索：${q}` : ALL_TITLE}${page > 1 ? ` · 第 ${page} 页` : ""}`;
-  const noindex = !!q || hasFeedFilters(f);
+  const noindex = !!q || !!f?.collection || hasFeedFilters(f);
   return pageMeta({
     title,
     description: `${SITE.name} 收录的${subjectAfter("全部", "相关动态")}，可按频道、类别与标签筛选，支持中英文搜索。`,
@@ -74,7 +76,7 @@ export default function AllPage() {
   const f = data.filters;
   const busy = navigation.state === "loading" && navigation.location?.pathname === "/all";
   const { channel, category } = filterParams(f);
-  const keep = { channel, category, sort: f.sort === "published" ? "published" : null };
+  const keep = { channel, category, tag: f.tag, collection: f.collection ?? null, sort: f.sort === "published" ? "published" : null };
   const sortHref = (sort: "collected" | "published") => {
     const sp = new URLSearchParams(params);
     sp.delete("page");
@@ -87,6 +89,13 @@ export default function AllPage() {
     if (tab === "relevance") sp.set("tab", "relevance");
     else sp.delete("tab");
     return `/all?${sp}`;
+  };
+  const collectionHref = (radar: boolean) => {
+    const sp = new URLSearchParams(params);
+    sp.delete("page");
+    if (radar) sp.set("collection", "radar"); else sp.delete("collection");
+    const query = sp.toString();
+    return query ? `/all?${query}` : "/all";
   };
   const contentTabHref = (evergreen: boolean) => {
     const sp = new URLSearchParams(params);
@@ -136,6 +145,8 @@ export default function AllPage() {
           { key: "evergreen", label: "常青内容", to: contentTabHref(true) },
         ]}
       />
+
+      {webModules().some(m => m.name === "rankings") && <div className="mb-4 flex items-center gap-3"><span className="text-[13px] text-ink-4">来源</span><PillTabs size="xs" layoutId="all-collection" label="雷达筛选" active={f.collection === "radar" ? "radar" : "all"} items={[{ key: "all", label: "全部来源", to: collectionHref(false) }, { key: "radar", label: "热文雷达", to: collectionHref(true) }]} /></div>}
 
       {/* Desktop, as on 精选: the title, then one filter row with the search field aligned on the right. */}
       <div className="hidden lg:block">

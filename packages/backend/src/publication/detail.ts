@@ -1,3 +1,4 @@
+import { serverModules } from "../modules.ts";
 // Item detail and Markdown export, both behind the same visibility and licence rules.
 import type { OutlineEntry, SiteItemDetail, StoryRef } from "@aihot/contracts/site";
 import { toPublicApiCategory, type PublicApiCategoryKey } from "@aihot/contracts/taxonomy";
@@ -96,6 +97,8 @@ export async function loadItemDetail(id: string, language: "zh" | "original" = "
   const row = await loadRow(id);
   if (!row || !hasItemPage({ visibility: row.visibility, sourceMode: row.source_mode })) return { kind: "not_found" };
 
+  const annotations = Object.assign({}, ...(await Promise.all(serverModules().flatMap(m => m.pool?.annotate ? [m.pool.annotate([id])] : []))));
+  if (annotations[id]?.sourceName) row.source_name = annotations[id].sourceName;
   const summary = toItemSummary(row);
   if (row.visibility === "summary-only") {
     const item: SiteItemDetail = {

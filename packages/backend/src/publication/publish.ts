@@ -11,7 +11,7 @@ import { originalPostCopy } from "../content/posts.ts";
 import { itemUrl } from "./links.ts";
 import { pickRepresentative, REPRESENTATIVE_COLUMNS, type RepresentativeIdentity } from "./representative.ts";
 import { enqueue, QUEUES, shutdownSignal } from "../jobs/queue.ts";
-import { emit } from "../modules.ts";
+import { emit, serverModules } from "../modules.ts";
 import {
   bodyModeOf, channelOf, displayTags, isIndexable, isPoolEligible, isListedByDate, isSelectable, isIndependentSelectedSource, mayRedistribute, publicSourceName, type SourceFacts,
 } from "./rules.ts";
@@ -285,7 +285,9 @@ export async function publishArticleTx(tx: Tx, articleId: string, options: Publi
   // Explicit imports can retain an editorial decision already published elsewhere.
   const contentEligible = isPoolEligible({ participationMode: source.participation_mode, relevance, title, summary, originalPost: !!original });
   const normalDate = isListedByDate({ backfill: article.backfill, publishedAt: article.published_at, releasedAt: options.releasedAt, listUndated: false });
-  const eligible = contentEligible && isListedByDate({ backfill: article.backfill, publishedAt: article.published_at, releasedAt: options.releasedAt, listUndated: article.published_at === null && f.listUndated === true });
+  const siteListsUndated = article.published_at === null && contentEligible && f.listUndated !== false
+    ? (await Promise.all(serverModules().flatMap(m => m.listUndated ? [m.listUndated(articleId, tx)] : []))).some(Boolean) : false;
+  const eligible = contentEligible && isListedByDate({ backfill: article.backfill, publishedAt: article.published_at, releasedAt: options.releasedAt, listUndated: article.published_at === null && (f.listUndated === true || siteListsUndated) });
   const selectionCandidate = isSelectable(contentEligible && normalDate, judgedSelected, source.tier);
   // Scoring nominates a report; a completed identity/value decision admits it to selection.
   // A historical import already has its public decision. Preserve that confirmed state on rebuild.

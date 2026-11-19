@@ -7,7 +7,7 @@ import { IntentLink } from "../../components/ui/IntentLink";
 import type { GroupInfo, FeedItemSummary, TimelineFilters } from "@aihot/contracts/site";
 import { CATEGORY_LABELS } from "@aihot/contracts/taxonomy";
 import { ITEM_COPY } from "@aihot/site";
-import { SameEventBadge, SelectedBadge } from "../../components/ui/Badge";
+import { Badge, SameEventBadge, SelectedBadge } from "../../components/ui/Badge";
 import { ScoreLabel } from "../../components/ui/Score";
 import { beijingTime } from "@aihot/contracts/time";
 import { MediaThumbs, SourceLine, StarButton, readTone } from "./parts";
@@ -42,6 +42,7 @@ export const FeedItem = memo(function FeedItem({ item, group, filters, read = fa
     <article className="relative min-w-0 lg:card lg:card-hover lg:px-[18px] lg:pb-[14px] lg:pt-[15px]" data-item-id={item.id}>
       <header className="flex min-h-[22px] items-center gap-1.5 text-[12.5px] leading-[18px] text-ink-4 lg:min-h-[18px] lg:gap-2">
         <SourceLine item={item} className="text-ink-4" />
+        {item.badge && <Badge tone="accent">{item.badge}</Badge>}
         {at && (
           <time dateTime={at} className="mono shrink-0 text-[12px] lg:hidden">
             · {beijingTime(at)}

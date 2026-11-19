@@ -15,7 +15,7 @@ export async function recordRadarTasks(db: Db, snapshot: { id: number; fetched_a
   const [enabled] = await db`SELECT 1 FROM radar_body_activation WHERE activated_at <= ${snapshot.fetched_at} LIMIT 1`;
   if (!enabled) return;
   await db`INSERT INTO sources (id,name,kind,config,tier,participation_mode,interval_minutes,enabled,health,tags)
-    VALUES ('radar-discovery','热文雷达','external','{}'::jsonb,'T2','isolated',1440,true,'ok',${["radar"]}) ON CONFLICT (id) DO NOTHING`;
+    VALUES ('radar-discovery','热文雷达','external','{}'::jsonb,'EXCLUDE_MP','isolated',1440,true,'ok',${["radar"]}) ON CONFLICT (id) DO NOTHING`;
   const judgments = new Map(results.map(j => [j.rank, j]));
   for (const item of snapshot.items) {
     const j = judgments.get(item.rank);
@@ -29,7 +29,10 @@ export async function recordRadarTasks(db: Db, snapshot: { id: number; fetched_a
       const articleId = known?.id ?? (await upsertMaterial({ sourceId: 'radar-discovery', url: item.url, title: item.title, via: 'rankings' }, db)).articleId;
       [task] = await db<{ id: number }[]>`INSERT INTO radar_body_tasks (identity_key,article_id,title,url,origin)
         VALUES (${identity},${articleId},${item.title},${item.url},${item.origin})
-        ON CONFLICT (identity_key) DO UPDATE SET identity_key=excluded.identity_key RETURNING id`;
+        ON CONFLICT (identity_key) DO UPDATE SET
+          state=CASE WHEN radar_body_tasks.article_id IS NULL THEN 'pending' ELSE radar_body_tasks.state END,
+          attempts=CASE WHEN radar_body_tasks.article_id IS NULL THEN 0 ELSE radar_body_tasks.attempts END,
+          article_id=coalesce(radar_body_tasks.article_id,excluded.article_id) RETURNING id`;
     } else {
       [task] = await db<{ id: number }[]>`INSERT INTO radar_body_tasks (title,url,origin,state,error)
         VALUES (${item.title},${item.url},${item.origin},'manual','没有有效的文章链接') RETURNING id`;
@@ -108,4 +111,24 @@ export async function releaseExternalTask(id: string, token: string, error: stri
   const rows = await sql`UPDATE radar_body_tasks SET state='external',error=${error.trim().slice(0, 500)},lease_until=null,lease_token=null,updated_at=now()
     WHERE id=${id}::bigint AND state='leased' AND lease_token=${token} AND lease_until>now() RETURNING id`;
   if (!rows.length) throw new RadarTaskError(409, 'task lease is invalid or expired');
+}
+
+/** Publish only when the operator enables the radar source. Existing isolated tasks are handled too. */
+export async function processRadarPublications() {
+  for (let n = 0; n < 20; n++) {
+    const queued = await sql.begin(async tx => {
+      const [a] = await tx<{ id: string }[]>`SELECT a.id FROM articles a
+        JOIN sources s ON s.id=a.source_id JOIN radar_body_tasks t ON t.article_id=a.id
+        WHERE s.id='radar-discovery' AND s.enabled AND s.participation_mode='editorial'
+          AND t.state IN ('complete','external','leased')
+          AND (a.processing_state='skipped' OR (a.processing_state='new' AND (a.processing_queued_at IS NULL OR a.processing_queued_at < now()-interval '30 minutes')))
+          AND NOT EXISTS (SELECT 1 FROM analyses an WHERE an.article_id=a.id AND an.input_revision=a.revision AND an.relevance IS NOT NULL)
+        ORDER BY a.discovered_at DESC FOR UPDATE OF a SKIP LOCKED LIMIT 1`;
+      if (!a) return false;
+      await tx`UPDATE articles SET processing_state='new' WHERE id=${a.id}`;
+      await queueProcessing(a.id, { db: tx });
+      return true;
+    });
+    if (!queued) break;
+  }
 }

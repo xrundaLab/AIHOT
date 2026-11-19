@@ -81,7 +81,7 @@ export function registerSite(app: FastifyInstance) {
     const page = Math.min(Math.max(Number(q.page) || 1, 1), 50);
     const search = q.q?.trim() ? q.q.trim().slice(0, 200) : null;
     const tab = q.tab === "relevance" ? "relevance" : "time";
-    return sendJsonWithEtag(req, reply, await loadPool({ ...filters, q: search, tab, sort: q.sort === "published" ? "published" : "collected", page }), { etagPrefix: "pool", cacheControl: "public, max-age=60, s-maxage=60" });
+    return sendJsonWithEtag(req, reply, await loadPool({ ...filters, collection: q.collection?.trim().slice(0, 60) || null, q: search, tab, sort: q.sort === "published" ? "published" : "collected", page }), { etagPrefix: "pool", cacheControl: "public, max-age=60, s-maxage=60" });
   }));
 
   app.get("/api/site/items/:id", siteHandler(async (req, reply) => {

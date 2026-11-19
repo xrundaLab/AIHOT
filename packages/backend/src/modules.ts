@@ -184,6 +184,15 @@ export interface ServerModule {
   name: string;
   /** Sources whose selected articles keep independent cards/seats without changing admission or event identity (publication/rules.ts, scope.ts). */
   independentSelectedSources?: readonly string[];
+  /** Aggregated sources that cannot confer full-text permission for their members. */
+  summaryOnlySources?: readonly string[];
+  /** Explicit site policy for listing undated material without making it selectable. */
+  listUndated?: (articleId: string, db: Db) => Promise<boolean>;
+  /** Optional pool filter and card annotation supplied by a site's module. */
+  pool?: {
+    filter?: (key: string) => import("postgres").PendingQuery<any> | undefined;
+    annotate?: (ids: string[]) => Promise<Record<string, { badge?: string; sourceName?: string }>>;
+  };
   /** Its HTTP routes, and hooks on the app such as what to flush when it closes, registered before the engine's v1 fallbacks (apps/api/src/app.ts). */
   http?: (app: FastifyInstance) => void;
   agent?: {

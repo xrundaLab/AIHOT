@@ -57,7 +57,9 @@ export function SearchOverlay() {
   const [hasText, setHasText] = useState(false);
   const recent = useRecentSearches();
   const navigation = useNavigation();
-  const { key } = useLocation();
+  const { key, pathname, search } = useLocation();
+  const current = pathname === "/all" ? new URLSearchParams(search) : new URLSearchParams();
+  const searchFilters = ["collection", "category", "channel", "tag", "sort"].flatMap(name => { const value = current.get(name); return value ? [{ name, value }] : []; });
   const [more, setMore] = useState<Awaited<ReturnType<typeof loadSuggestions>> | null>(null);
 
   useModal({ open: shown, panel, initialFocus: input, returnFocus: opener, onClose: close });
@@ -128,6 +130,7 @@ export function SearchOverlay() {
         }}
         className="flex h-14 shrink-0 items-center gap-1 pl-4 pr-1 pt-[env(safe-area-inset-top)]"
       >
+        {searchFilters.map(({ name, value }) => <input key={name} type="hidden" name={name} value={value} />)}
         <label className="relative flex-1">
           <span className="sr-only">搜索标题、摘要和正文</span>
           <IconSearch size={18} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-4" />
