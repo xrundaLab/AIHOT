@@ -57,3 +57,26 @@ test("a weekly that froze no summaries shows the articles' public summaries", as
   await publishArticle(articleId);
   assert.equal((await loadReport("weekly", WEEK))?.sections[0]?.items[0]?.firstParty, false);
 });
+
+test("daily prompt publish pins a version and can restore the prior wording", async () => {
+  const { dailyPrompt, dailyPromptForRun, publishDailyPrompt } = await import("@aihot/backend/reports/daily-prompt");
+  const baseline = await dailyPrompt();
+  await assert.rejects(publishDailyPrompt("missing includes", baseline.current.at, "test"), { statusCode: 400 });
+  const wording = baseline.current.text + "\n日报提示词测试版本。\n";
+  const published = await publishDailyPrompt(wording, baseline.current.at, "test");
+  assert.match((await dailyPromptForRun()).system, /日报提示词测试版本/);
+  await assert.rejects(publishDailyPrompt(wording, baseline.current.at, "test"), { statusCode: 409 });
+  await publishDailyPrompt(published.history[0]!.text, published.current.at, "test");
+  assert.equal((await dailyPrompt()).current.text, baseline.current.text);
+});
+
+test("daily Markdown includes the issue link and public archive data", async () => {
+  const { dailyMarkdown } = await import("@aihot/backend/publication/daily-markdown");
+  const date = "2098-01-16";
+  await sql`INSERT INTO reports(kind,key,window_start,window_end,content,generated_at)
+    VALUES('daily',${date},now(),now(),${sql.json({ title: "日报导出", sections: [], flashes: [] })},now())`;
+  const markdown = await dailyMarkdown(date);
+  assert.match(markdown ?? "", /日报日期：2098-01-16/);
+  assert.match(markdown ?? "", /\/daily\/2098-01-16>/);
+  assert.equal(await dailyMarkdown("2098-01-17"), null);
+});

@@ -553,6 +553,7 @@ export function ReportPaper({ report, index }: { report: ReportDetail; index: Re
             {daily ? "日报合订本" : `往期${REPORT_NAMES[report.kind]}`}
           </Link>
         </p>
+        {daily && <a className="text-[12px] text-ink-4 hover:text-ink-2" href={`/api/site/reports/daily/${report.key}/markdown`}>下载 Markdown</a>}
         {daily && <RegenerateDaily date={report.key} generatedAt={report.generatedAt} />}
       </footer>
     </article>

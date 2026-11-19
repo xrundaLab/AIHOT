@@ -1,3 +1,4 @@
+import { dailyMarkdown } from "@aihot/backend/publication/daily-markdown";
 import { dailyRegeneration, requestDailyRegeneration } from "@aihot/backend/reports/regenerate";
 // First-party site API (/api/site/*). Not public, not versioned, never called /api/v2.
 // Reads through the same public read layer as v1; no cookies are read or set.
@@ -58,6 +59,14 @@ export function parseFilters(q: Record<string, string>): FilterParams {
 }
 
 export function registerSite(app: FastifyInstance) {
+  app.get("/api/site/reports/daily/:date/markdown", async (req, reply) => {
+    const { date } = req.params as { date: string };
+    const markdown = /^\d{4}-\d{2}-\d{2}$/.test(date) ? await dailyMarkdown(date) : null;
+    if (markdown === null) return sendProblem(req, reply, { status: 404, code: "not_found", detail: "找不到这期日报。" });
+    return reply.header("Cache-Control", "no-store")
+      .header("Content-Disposition", `attachment; filename="daily-${date}.md"`)
+      .type("text/markdown; charset=utf-8").send(markdown);
+  });
   app.get("/api/site/reports/daily/:date/regeneration", async (req, reply) => {
     reply.header("Cache-Control", "no-store");
     return { run: await dailyRegeneration((req.params as { date: string }).date) };

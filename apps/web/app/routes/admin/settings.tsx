@@ -10,7 +10,12 @@ import { toast } from "../../features/admin/toast";
 
 
 export async function loader({ request }: Route.LoaderArgs) {
-  return adminGet<AdminSettings>(request, "/api/admin/settings");
+  const [settings, prompt] = await Promise.all([
+    adminGet<AdminSettings>(request, "/api/admin/settings"),
+    adminGet<PromptState>(request, "/api/admin/prompts/daily-review"),
+  ]);
+  return { ...settings, prompt };
+
 }
 
 export const meta: Route.MetaFunction = () => [{ title: `设置 · ${SITE.name} 后台` }];
@@ -99,9 +104,57 @@ function TargetToggle({ t }: { t: AdminSettings["targets"][number] }) {
   );
 }
 
+type PromptRevision = { text: string; at: string | null };
+type PromptState = { current: PromptRevision; history: PromptRevision[] };
+
+function DailyPromptSettings({ state }: { state: PromptState }) {
+  const { run, pending } = useAdminAction();
+  const [draft, setDraft] = useState<{ text: string; expected: string | null } | null>(null);
+  const download = () => {
+    const url = URL.createObjectURL(new Blob([state.current.text], { type: "text/markdown;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "daily-review.md";
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+  const preview = (text: string) => setDraft({ text, expected: state.current.at });
+  return (
+    <Card>
+      <h2>提示词管理</h2>
+      <p>日报适用性审核 · {state.current.at ? bj(state.current.at) : "随部署提供的版本"}</p>
+      <Button onClick={download}>下载当前 Markdown</Button>
+      <label>上传 Markdown
+        <input type="file" accept=".md,.markdown" onChange={async e => {
+          const file = e.currentTarget.files?.[0];
+          e.currentTarget.value = "";
+          if (!file) return;
+          if (file.size > 65536) return toast("提示词最大 64 KB", "error");
+          try { preview(await file.text()); }
+          catch { toast("无法读取文件", "error"); }
+        }} />
+      </label>
+      {state.history.map((revision, i) => (
+        <Button key={i} onClick={() => preview(revision.text)}>
+          预览历史版本 {revision.at ? bj(revision.at) : "随部署提供的版本"}
+        </Button>
+      ))}
+      {draft && <div>
+        <details><summary>当前生效内容</summary><pre className="whitespace-pre-wrap">{state.current.text}</pre></details>
+        <details open><summary>待发布内容</summary><pre className="whitespace-pre-wrap">{draft.text}</pre></details>
+        <Button disabled={!!pending || draft.text === state.current.text} onClick={async () => {
+          if (await run("POST", "/api/admin/prompts/daily-review", draft, { success: "日报提示词已发布" })) setDraft(null);
+        }}>确认发布</Button>
+        <Button onClick={() => setDraft(null)}>取消</Button>
+      </div>}
+    </Card>
+  );
+}
+
 export default function SettingsAdmin({ loaderData: s }: Route.ComponentProps) {
   return (
     <AdminPage title="设置" subtitle="不改代码即可替换的运营设置。每次修改都写入审计记录。">
+      <DailyPromptSettings state={s.prompt} />
       <div className="grid gap-5 xl:grid-cols-2">
         <Card title="关于页二维码">
           <div className="space-y-5">
