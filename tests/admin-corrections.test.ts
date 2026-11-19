@@ -166,6 +166,11 @@ test("daily regeneration is authenticated, CSRF protected and coalesces concurre
   try {
     config.devAdmin = null;
     assert.equal((await app.inject({ method: "POST", url: `/api/admin/reports/daily/${date}/regenerate` })).statusCode, 401);
+    assert.equal((await app.inject({ method: "POST", url: `/api/site/reports/daily/${date}/regenerate` })).statusCode, 403);
+    assert.equal((await app.inject({ method: "POST", url: `/api/site/reports/daily/${date}/regenerate`, headers: { "x-daily-regeneration": "1", "sec-fetch-site": "cross-site" } })).statusCode, 403);
+    const publicResponse = await app.inject({ method: "POST", url: `/api/site/reports/daily/${date}/regenerate`, headers: { "x-daily-regeneration": "1" } });
+    assert.equal(publicResponse.statusCode, 200, publicResponse.body);
+    assert.equal((await app.inject({ method: "GET", url: `/api/site/reports/daily/${date}/regeneration` })).json().run.id, publicResponse.json().run.id);
     config.devAdmin = { displayName: "Report tester" };
     assert.equal((await app.inject({ method: "POST", url: `/api/admin/reports/daily/${date}/regenerate` })).statusCode, 403);
     const responses = await Promise.all(Array.from({ length: 3 }, () => app.inject({ method: "POST", url: `/api/admin/reports/daily/${date}/regenerate`, headers: { "x-csrf-token": "dev" } })));

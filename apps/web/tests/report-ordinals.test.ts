@@ -41,7 +41,7 @@ const api = fakeApi((url, res, req) => {
     return { name: "测试管理员", csrf: "fixture-csrf", dev: false };
   }
   if (url.pathname.endsWith("/regenerate")) {
-    assert.equal(req.headers["x-csrf-token"], "fixture-csrf");
+    assert.equal(req.headers["x-daily-regeneration"], "1");
     started = true; checks = 0;
     return { run: { id: "fixture-run", status: "queued", finishedAt: null, error: null } };
   }
@@ -111,18 +111,16 @@ test("the daily archive counts every issue, as the masthead numbers them", async
 });
 
 
-test("daily labels and administrator-only regeneration work through the production page", async () => {
+test("daily labels and anonymous regeneration work through the production page", async () => {
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
     await page.goto(`${web.origin}/daily/${previewKey}`);
     await page.waitForLoadState("networkidle");
-    assert.equal(await page.getByRole("button", { name: "重新生成", exact: true }).count(), 0);
+    assert.equal(await page.getByRole("button", { name: "重新生成", exact: true }).count(), 1);
     assert.ok(await page.getByText("精选", { exact: true }).count());
     assert.ok(await page.getByText("热点", { exact: true }).count());
     assert.ok(await page.getByText("AI评分 86", { exact: true }).count());
-    await page.context().addCookies([{ name: "fixture_admin", value: "1", url: web.origin }]);
-    await page.reload();
     const button = page.getByRole("button", { name: "重新生成", exact: true });
     await button.waitFor();
     await button.click();

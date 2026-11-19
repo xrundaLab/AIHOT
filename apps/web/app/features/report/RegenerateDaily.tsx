@@ -1,29 +1,22 @@
-// Public report loaders remain cacheable; an administrator's control is discovered client-side only.
+// Public readers can explicitly enqueue regeneration; reading the report never starts work.
 import { useEffect, useRef, useState } from "react";
-import type { AdminDailyRegeneration, AdminMe } from "@aihot/contracts/admin";
+import type { AdminDailyRegeneration } from "@aihot/contracts/admin";
 
 export function RegenerateDaily({ date, generatedAt }: { date: string; generatedAt: string }) {
   const requestId = useRef<string | null>(null);
   const watching = useRef<string | null>(null);
-  const [me, setMe] = useState<AdminMe | null>(null);
   const [run, setRun] = useState<AdminDailyRegeneration | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const busy = submitting || run?.status === "queued" || run?.status === "running";
   useEffect(() => {
-    const controller = new AbortController();
-    fetch("/api/admin/me", { credentials: "same-origin", cache: "no-store", signal: controller.signal })
-      .then(async r => { if (r.ok) setMe(await r.json()); }).catch(() => {});
-    return () => controller.abort();
-  }, []);
-  useEffect(() => {
-    if (!me || submitting) return;
+    if (submitting) return;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const poll = async () => {
       try {
-        const res = await fetch(`/api/admin/reports/daily/${date}/regeneration`, { credentials: "same-origin", cache: "no-store", signal: controller.signal });
-        if (!res.ok) throw new Error("无法读取重新生成状态，请在后台运行页查看");
+        const res = await fetch(`/api/site/reports/daily/${date}/regeneration`, { credentials: "same-origin", cache: "no-store", signal: controller.signal });
+        if (!res.ok) throw new Error("无法读取重新生成状态，请稍后刷新重试");
         const data = await res.json() as { run: AdminDailyRegeneration | null };
         setRun(data.run);
         if (data.run?.status === "queued" || data.run?.status === "running") {
@@ -42,14 +35,13 @@ export function RegenerateDaily({ date, generatedAt }: { date: string; generated
     };
     void poll();
     return () => { controller.abort(); clearTimeout(timer); };
-  }, [me, date, generatedAt, submitting]);
+  }, [date, generatedAt, submitting]);
 
-  if (!me) return null;
   const regenerate = async () => {
     setSubmitting(true); setError("");
     try {
-      const response = await fetch(`/api/admin/reports/daily/${date}/regenerate`, {
-        method: "POST", credentials: "same-origin", headers: { "x-csrf-token": me.csrf, "idempotency-key": requestId.current ??= crypto.randomUUID() },
+      const response = await fetch(`/api/site/reports/daily/${date}/regenerate`, {
+        method: "POST", credentials: "same-origin", headers: { "x-daily-regeneration": "1", "idempotency-key": requestId.current ??= crypto.randomUUID() },
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail ?? "提交失败，请稍后重试");
