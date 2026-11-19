@@ -26,6 +26,19 @@ export async function loadRankings(now = new Date()): Promise<Ranking[]> {
       ORDER BY CASE WHEN b.id='tunbang:all' THEN 0 ELSE 1 END,b.name`,
     ...[2, 48, 72, 168].map(hours => loadFamilyRanking(hours, now)),
   ]);
+  const taskStates = await sql<{ board_id: string; rank: number; state: Entry["bodyState"]; article_id: string | null }[]>`
+    SELECT b.id AS board_id,o.rank,t.state,CASE WHEN ${listedCondition(now)} THEN p.article_id ELSE NULL END AS article_id FROM external_rankings b
+    JOIN external_ranking_snapshots s ON s.board_id=b.id AND s.fetched_at=b.fetched_at
+    JOIN radar_body_occurrences o ON o.snapshot_id=s.id JOIN radar_body_tasks t ON t.id=o.task_id
+    LEFT JOIN publications p ON p.article_id=t.article_id`;
+  const states = new Map(taskStates.map(row => [`${row.board_id}:${row.rank}`, row]));
+  for (const board of rows) for (const item of board.items) {
+    const state = states.get(`${board.id}:${item.rank}`);
+    if (state) {
+      item.bodyState = state.state;
+      if (state.article_id) item.detailUrl = `/items/${encodeURIComponent(state.article_id)}`;
+    }
+  }
   // Match only exact source URLs and only publicly listed articles. Ambiguous URLs
   // deliberately remain external rather than sending readers to the wrong article.
   const urls = [...new Set(rows.flatMap(board => board.items.map(item => item.url).filter((url): url is string => !!url && /^https?:\/\//.test(url))))];
@@ -37,7 +50,7 @@ export async function loadRankings(now = new Date()): Promise<Ranking[]> {
     const details = new Map(matches.map(row => [row.url, `/items/${encodeURIComponent(row.id)}`]));
     for (const board of rows) for (const item of board.items) {
       const detailUrl = item.url && details.get(item.url);
-      if (detailUrl) item.detailUrl = detailUrl;
+      if (detailUrl && !item.detailUrl) item.detailUrl = detailUrl;
     }
   }
   const family: Ranking[] = ["2小时", "48小时", "3天", "7天"].map((name, index) => ({ id: `family:${[2,48,72,168][index]}`, name, source: "家友榜", url: "/all", items: familyItems[index], sourceUpdated: null, fetchedAt: now.toISOString(), failed: false }));

@@ -34,3 +34,15 @@ test("snapshot screening saves valid results and leaves invalid output as failed
   assert.equal(failed!.status, "failed");
   assert.equal(failed!.results, null);
 });
+
+test('completed screening records new A-level article tasks atomically', async () => {
+  malformed = false;
+  await sql`INSERT INTO radar_body_activation(id,activated_at) VALUES (true,now()-interval '1 day') ON CONFLICT(id) DO UPDATE SET activated_at=excluded.activated_at`;
+  const items = [{ rank: 1, title: '雷达文章', url: 'https://example.org/radar-article', heat: '', origin: '测试来源' }];
+  const [snapshot] = await sql<{ id: number }[]>`INSERT INTO external_ranking_snapshots(board_id,name,source,url,items,fetched_at,rule_version,rule_prompt)
+    VALUES ('screen-task','测试榜','测试来源','https://example.org',${sql.json(items)},now(),'test-v1','判断') RETURNING id`;
+  assert.deepEqual(await screenRankings(), { processed: 1 });
+  const [task] = await sql`SELECT t.state,a.url FROM radar_body_occurrences o JOIN radar_body_tasks t ON t.id=o.task_id JOIN articles a ON a.id=t.article_id WHERE o.snapshot_id=${snapshot!.id}`;
+  assert.equal(task!.state, 'pending');
+  assert.equal(task!.url, items[0]!.url);
+});

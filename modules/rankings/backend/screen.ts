@@ -4,6 +4,7 @@ import { modelFor } from "@aihot/backend/editorial/models";
 import { chatJson } from "@aihot/backend/providers/llm";
 import { completeReceipt, failureKind } from "@aihot/backend/providers/receipts";
 import type { Entry } from "./tunbang.ts";
+import { recordRadarTasks } from "./body.ts";
 
 export interface RankingJudgement { rank: number; title: string; level: "A" | "B" | "C"; reason: string; caution: string; related_ranks: number[] }
 interface Snapshot { id: number; board_id: string; name: string; source: string; period: string | null; items: Entry[]; source_updated: string | null; fetched_at: Date; rule_version: string; rule_prompt: string; attempts: number }
@@ -52,7 +53,10 @@ export async function screenRankings() {
         schema: judgementSchema(snapshot), temperature: 0.1, maxTokens: 16000 });
       await sql.begin(async tx => {
         const updated = await tx`UPDATE external_ranking_snapshots SET status='complete',results=${tx.json(result.data.results as never)},receipt_id=${result.receiptId},finished_at=now(),error=null WHERE id=${snapshot.id} AND status='processing' AND attempts=${snapshot.attempts} RETURNING id`;
-        if (updated.length) await completeReceipt(tx, result.receiptId);
+        if (updated.length) {
+          await recordRadarTasks(tx, snapshot, result.data.results);
+          await completeReceipt(tx, result.receiptId);
+        }
       });
       processed++;
     } catch (error) {

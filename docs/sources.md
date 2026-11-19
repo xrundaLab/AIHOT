@@ -276,3 +276,16 @@ Content-Type: application/json
 - `sourceId` 不存在时会自动建一个 `external` 信源，默认不进公开页面：到后台把它的参与方式改成 `editorial` 才会出现在站上。
 - 在后台暂停信源后，推送接口返回 409，不再接收新文章；恢复信源后可以继续推送。
 - 条目的 `raw._aihot.backfill` 为 `true` 时按历史回灌处理（不进入“今天”、不推送）。
+
+## 热文雷达正文补采
+
+新采集的榜单经判断为 A 级后，雷达按文章地址去重并尝试获取正文。无法自动获取的条目进入外部补采队列；没有有效链接的条目标记为待人工处理。旧榜单快照不会自动回灌。新发现文章先归入隔离的 `radar-discovery` 信源，不会自动进入公开动态；已存在的文章保留原信源。正文能否在站内展示仍由所属信源的全文许可决定。
+
+外部工具使用 `INGEST_TOKEN`：
+
+- `GET /api/ingest/radar/tasks` 查看最多 100 条待外部处理、已领取和缺链接任务；返回只读列表，不改变状态。返回的 `nextCursor` 非空时，以 `?after=<nextCursor>` 获取下一页。
+- `POST /api/ingest/radar/tasks/claim` 原子领取一条任务，返回 `task`（没有任务时为 `null`）。其中 `id` 是字符串，`leaseToken` 是本次领取凭据，`leaseUntil` 是到期时间；30 分钟内未完成会重新开放领取。
+- `POST /api/ingest/radar/tasks/{id}/body` 回传 JSON：`{"leaseToken":"...","bodyText":"完整正文","images":["https://example.org/image.jpg"]}`。正文必填，最多 100 万字符；图片可省略，最多 6 个 HTTP(S) URL。相同领取凭据和相同内容的重试是幂等的；正文或图片不同、领取过期、文章在领取后已变更时返回 409，不覆盖已有内容。
+- `POST /api/ingest/radar/tasks/{id}/failure` 回传 JSON：`{"leaseToken":"...","error":"抓取失败原因"}`，释放任务供重试。
+
+领取和回传均需 `Authorization: Bearer <INGEST_TOKEN>`。正文回填会保留原始信源和 URL，按文章版本记录更新并重新排入处理队列。该接口不会为未获授权的来源自动打开全文展示。

@@ -12,6 +12,7 @@ async function read(url: string): Promise<string> {
   return html;
 }
 async function save(board: Board, { items, sourceUpdated }: { items: Entry[]; sourceUpdated: string | null }) {
+  await sql`INSERT INTO radar_body_activation (id) VALUES (true) ON CONFLICT (id) DO NOTHING`;
   const fetchedAt = new Date();
   const publicItems = items.map(({ raw: _raw, ...item }) => item);
   await sql.begin(async tx => {
