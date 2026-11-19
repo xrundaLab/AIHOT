@@ -19,6 +19,7 @@ import { resolveDelivery } from "@aihot/backend/notify/deliver";
 import { releaseReceipt } from "@aihot/backend/operations/recover";
 import { replaceContactQr, setTargetEnabled, settingsOverview, updateBudget } from "@aihot/backend/admin/settings";
 import { createSource, exportSources, fetchNow, listSources, lookupMpAccount, previewSource, previewStoredSource, setSourcesEnabled, sourceDetail, updateSource } from "@aihot/backend/admin/sources";
+import { dailyLogMarkdown } from "@aihot/backend/reports/daily-log";
 import { sendProblem } from "../http/respond.ts";
 import { adminHandler } from "./admin-auth.ts";
 
@@ -140,6 +141,14 @@ export function registerAdmin(app: FastifyInstance) {
   app.post("/api/admin/processing/requeue", adminHandler(async (req, _reply, admin) => requeueFailedArticles(body(req) as never, actorOf(admin))));
 
   // Settings
+  app.get("/api/admin/reports/daily/:date/log", adminHandler(async (req, reply) => {
+    const date = param(req, "date");
+    const markdown = /^\d{4}-\d{2}-\d{2}$/.test(date) ? await dailyLogMarkdown(date) : null;
+    if (markdown === null) return notFound(req, reply);
+    return reply.header("Cache-Control", "no-store")
+      .header("Content-Disposition", `attachment; filename="daily-log-${date}.md"`)
+      .type("text/markdown; charset=utf-8").send(markdown);
+  }));
   app.get("/api/admin/settings", adminHandler(async () => settingsOverview()));
   app.post("/api/admin/settings/contact-qr", adminHandler(async (req, _reply, admin) => {
     const b = body<{ slot: "wechatQr" | "feishuQr"; image: string }>(req);

@@ -93,3 +93,22 @@ test("daily history lists older snapshots and reads the requested revision", asy
   assert.equal((await loadReport("daily", date))?.generatedAt, "2098-01-18T03:00:00.000Z");
   assert.equal(await loadReport("daily", date, 99), null);
 });
+
+test("daily log exports only titles and original links grouped by stage", async () => {
+  const { dailyLogMarkdown } = await import("@aihot/backend/reports/daily-log");
+  const date = "2098-01-19";
+  const dailyLog = {
+    initial: [{ title: "候选", url: "https://example.org/initial" }],
+    supplements: [{ title: "补入", url: "https://example.org/extra" }],
+    events: [{ title: "代表稿", url: "https://example.org/event" }],
+    selected: [{ title: "入选稿", url: "https://example.org/selected" }],
+  };
+  await sql`INSERT INTO reports(kind,key,window_start,window_end,content,generated_at)
+    VALUES('daily',${date},now(),now(),${sql.json({ dailyLog, score: 80, summary: "not in the log" })},now())`;
+  assert.equal(await dailyLogMarkdown(date), [
+    "## 初筛候选\n\n- [候选](<https://example.org/initial>)\n",
+    "## 补充候选\n\n- [补入](<https://example.org/extra>)\n",
+    "## 事件合并后\n\n- [代表稿](<https://example.org/event>)\n",
+    "## 最终选稿\n\n- [入选稿](<https://example.org/selected>)\n",
+  ].join("\n"));
+});
