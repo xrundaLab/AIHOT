@@ -1,7 +1,7 @@
 // A weekly writer request sent before the stop that the provider then refuses: after the stop began,
 // the catch-up run treats it as an interruption (no failed issue, no failed run, nothing published).
 // The stop is the worker's own signal, aborted in this file's process; the provider is a local stub.
-import { editionAt, gate, Reply, stub, tag } from "./setup.ts";
+import { dailyReviewFixture, editionAt, gate, Reply, stub, tag } from "./setup.ts";
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { closeDb, sql } from "@aihot/backend/db";
@@ -11,7 +11,9 @@ import { composeDaily, composeDueReports } from "@aihot/backend/reports/compose"
 const T = tag();
 const SOURCE = `report-shutdown-${T}`;
 let hold: { asked: ReturnType<typeof gate<void>>; answer: ReturnType<typeof gate<void>> } | null = null;
-const provider = await stub(async () => {
+const provider = await stub(async (_hit, req) => {
+  const daily = dailyReviewFixture(JSON.parse(req.body).messages.at(-1).content);
+  if (daily) return { choices: [{ message: { content: JSON.stringify(daily) } }] };
   const held = hold;
   hold = null;
   if (held) {
@@ -34,8 +36,8 @@ test("a weekly writer refused after the stop began leaves catch-up without a fai
     const at = editionAt("daily", date, -12 * 3600);
     await sql`INSERT INTO articles (id, source_id, identity_key, url, title, discovered_at, timeline_at)
       VALUES (${id}, ${SOURCE}, ${id}, ${`https://example.com/${id}`}, ${id}, ${at}, ${at})`;
-    await sql`INSERT INTO publications (article_id, title, source_id, channel, url, discovered_at, timeline_at, sort_at, eligible, selected, visible_after, visibility, score)
-      VALUES (${id}, ${id}, ${SOURCE}, 'news', ${`https://example.com/${id}`}, ${at}, ${at}, ${at}, true, true, ${at}, 'public', 90)`;
+    await sql`INSERT INTO publications (article_id, title, source_id, channel, url, discovered_at, timeline_at, sort_at, summary, eligible, selected, visible_after, visibility, score)
+      VALUES (${id}, ${id}, ${SOURCE}, 'news', ${`https://example.com/${id}`}, ${at}, ${at}, ${at}, 'family summary', true, true, ${at}, 'public', 90)`;
     await composeDaily(date);
   }
   const reports = async () => (await sql<{ kind: string; key: string }[]>`SELECT kind, key FROM reports ORDER BY kind, key`).map((r) => `${r.kind}:${r.key}`);

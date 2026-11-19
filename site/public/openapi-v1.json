@@ -4303,6 +4303,43 @@
                   },
                   "leadParagraph": {
                     "type": "string"
+                  },
+                  "itemId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Cited article ID; null for legacy citations without an ID."
+                  },
+                  "selected": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ],
+                    "description": "This article was selected at composition time. Null means not recorded."
+                  },
+                  "hot": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ],
+                    "description": "Its event appeared on a published hot board in this edition window. Null means not recorded."
+                  },
+                  "fromRadar": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ],
+                    "description": "This article was supplied by an in-window completed A-level radar snapshot and was publicly readable with confirmed body and summary at composition time. Null means not recorded."
+                  },
+                  "score": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "minimum": 0,
+                    "maximum": 100,
+                    "description": "This article's composition-time score, not the event importance or heat."
                   }
                 }
               },
@@ -4356,6 +4393,49 @@
                       },
                       "attribution": {
                         "$ref": "#/components/schemas/Attribution"
+                      },
+                      "itemId": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "description": "Cited article ID; null for legacy citations without an ID."
+                      },
+                      "selected": {
+                        "type": [
+                          "boolean",
+                          "null"
+                        ],
+                        "description": "This article was selected at composition time. Null means not recorded."
+                      },
+                      "hot": {
+                        "type": [
+                          "boolean",
+                          "null"
+                        ],
+                        "description": "Its event appeared on a published hot board in this edition window. Null means not recorded."
+                      },
+                      "fromRadar": {
+                        "type": [
+                          "boolean",
+                          "null"
+                        ],
+                        "description": "This article was supplied by an in-window completed A-level radar snapshot and was publicly readable with confirmed body and summary at composition time. Null means not recorded."
+                      },
+                      "score": {
+                        "type": [
+                          "number",
+                          "null"
+                        ],
+                        "minimum": 0,
+                        "maximum": 100,
+                        "description": "This article's composition-time score, not the event importance or heat."
+                      },
+                      "related": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "#/components/schemas/DailyRelatedArticle"
+                        }
                       }
                     }
                   }
@@ -4398,9 +4478,108 @@
                 },
                 "attribution": {
                   "$ref": "#/components/schemas/Attribution"
+                },
+                "itemId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Cited article ID; null for legacy citations without an ID."
+                },
+                "selected": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ],
+                  "description": "This article was selected at composition time. Null means not recorded."
+                },
+                "hot": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ],
+                  "description": "Its event appeared on a published hot board in this edition window. Null means not recorded."
+                },
+                "fromRadar": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ],
+                  "description": "This article was supplied by an in-window completed A-level radar snapshot and was publicly readable with confirmed body and summary at composition time. Null means not recorded."
+                },
+                "score": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "maximum": 100,
+                  "description": "This article's composition-time score, not the event importance or heat."
+                },
+                "related": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DailyRelatedArticle"
+                  }
                 }
               }
             }
+          }
+        }
+      },
+      "DailyRelatedArticle": {
+        "type": "object",
+        "properties": {
+          "itemId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cited article ID; null for legacy citations without an ID."
+          },
+          "selected": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "This article was selected at composition time. Null means not recorded."
+          },
+          "hot": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Its event appeared on a published hot board in this edition window. Null means not recorded."
+          },
+          "fromRadar": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "This article was supplied by an in-window completed A-level radar snapshot and was publicly readable with confirmed body and summary at composition time. Null means not recorded."
+          },
+          "score": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100,
+            "description": "This article's composition-time score, not the event importance or heat."
+          },
+          "title": {
+            "type": "string"
+          },
+          "source": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              }
+            }
+          },
+          "links": {
+            "$ref": "#/components/schemas/DailyContentLinks"
           }
         }
       },

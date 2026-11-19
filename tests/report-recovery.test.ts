@@ -1,6 +1,6 @@
 // Failure cases: automatic runs rewrite published issues; report/receipt commits split; empty gaps
 // starve later daily/weekly/monthly issues or make a failed run look successful. All use a local model stub.
-import { editionAt, stub, tag } from "./setup.ts";
+import { dailyReviewFixture, editionAt, stub, tag } from "./setup.ts";
 import assert from "node:assert/strict";
 import { after, before, beforeEach, test } from "node:test";
 import { closeDb, sql } from "@aihot/backend/db";
@@ -10,7 +10,12 @@ import { composeDaily, composeDueReports, composeWeekly, composeMonthly } from "
 
 const T = tag();
 const SOURCE = `report-recovery-${T}`;
-const answer = async (user: string) => ({ title: user.slice(0, 100), leadParagraph: "导语", highlights: [1], headline: "本期进展", overview: "总述", themes: [{ heading: "主题", summary: "摘要", refs: [1] }] });
+let failDailyReview = false;
+const answer = async (user: string) => {
+  const review = dailyReviewFixture(user);
+  if (review && failDailyReview) return { decisions: review.decisions.map(d => ({ ...d, decision: "needs_body", quote: "" })) };
+  return review ?? ({ title: user.slice(0, 100), leadParagraph: "导语", highlights: [1], headline: "本期进展", overview: "总述", themes: [{ heading: "主题", summary: "摘要", refs: [1] }] });
+};
 const provider = await stub(async (_hit, request) => ({
   choices: [{ message: { content: JSON.stringify(await answer(JSON.parse(request.body).messages.at(-1).content)) } }],
 }));
@@ -31,8 +36,8 @@ async function item(date: string) {
   const at = editionAt("daily", date, -12 * 3600);
   await sql`INSERT INTO articles (id, source_id, identity_key, url, title, discovered_at, timeline_at)
     VALUES (${id}, ${SOURCE}, ${id}, 'https://example.com/report', ${id}, ${at}, ${at})`;
-  await sql`INSERT INTO publications (article_id, title, source_id, channel, url, discovered_at, timeline_at, sort_at, eligible, selected, visible_after, visibility, score)
-    VALUES (${id}, ${id}, ${SOURCE}, 'news', 'https://example.com/report', ${at}, ${at}, ${at}, true, true, ${at}, 'public', 90)`;
+  await sql`INSERT INTO publications (article_id, title, source_id, channel, url, discovered_at, timeline_at, sort_at, summary, eligible, selected, visible_after, visibility, score)
+    VALUES (${id}, ${id}, ${SOURCE}, 'news', 'https://example.com/report', ${at}, ${at}, ${at}, 'family summary', true, true, ${at}, 'public', 90)`;
   return id;
 }
 const report = async (kind: string, key: string) => (await sql`SELECT content, revision, generated_at FROM reports WHERE kind = ${kind} AND key = ${key}`)[0];
@@ -190,4 +195,44 @@ test("quiet first periods start at the site's first daily, while later missing d
   await sql`DELETE FROM reports WHERE kind = 'daily' AND key = '2024-02-08'`;
   await assert.rejects(composeWeekly("2024-W06"), /no daily entries/);
   await assert.rejects(composeMonthly("2024-02"), /no daily entries/);
+});
+
+test("manual regeneration runs in the worker, keeps the old edition and records its actor", async () => {
+  const { getBoss } = await import("@aihot/backend/jobs/queue");
+  const { registerPublicationJobs } = await import("@aihot/backend/jobs/publication");
+  const { requestDailyRegeneration, dailyRegeneration } = await import("@aihot/backend/reports/regenerate");
+  const id = await item("2024-06-04");
+  await composeDaily("2024-06-04");
+  const old = await report("daily", "2024-06-04");
+  await sql`UPDATE publications SET title='updated family title' WHERE article_id=${id}`;
+  const request = await requestDailyRegeneration("2024-06-04", "daily-tester", `worker-${T}`);
+  assert.equal(request?.status, "queued");
+  await registerPublicationJobs(await getBoss());
+  let status = await dailyRegeneration("2024-06-04");
+  const deadline = Date.now() + 10000;
+  while (status?.status !== "done" && Date.now() < deadline) {
+    assert.notEqual(status?.status, "failed", JSON.stringify(status));
+    await new Promise(resolve => setTimeout(resolve, 50));
+    status = await dailyRegeneration("2024-06-04");
+  }
+  assert.equal(status?.status, "done");
+  const current = await report("daily", "2024-06-04");
+  assert.equal(current.revision, old.revision + 1);
+  assert.equal(current.content.lead.title, "updated family title");
+  const [revision] = await sql`SELECT v.content FROM report_revisions v JOIN reports r ON r.id=v.report_id WHERE r.kind='daily' AND r.key='2024-06-04'`;
+  assert.deepEqual(revision!.content, old.content);
+  assert.ok((await sql`SELECT 1 FROM audit_log WHERE actor='daily-tester' AND action='report.regenerate.complete'`).length);
+});
+
+
+test("an unresolved body review preserves the prior daily without a partial revision", async () => {
+  await item("2024-07-02");
+  await composeDaily("2024-07-02");
+  const saved = await report("daily", "2024-07-02");
+  failDailyReview = true;
+  try {
+    await assert.rejects(composeDaily("2024-07-02", "test missing body", `missing-body-${T}`), /body unavailable/);
+    assert.deepEqual(await report("daily", "2024-07-02"), saved);
+    assert.equal((await sql`SELECT 1 FROM report_revisions v JOIN reports r ON r.id=v.report_id WHERE r.key='2024-07-02'`).length, 0);
+  } finally { failDailyReview = false; }
 });

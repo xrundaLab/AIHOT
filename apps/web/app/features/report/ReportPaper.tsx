@@ -1,3 +1,4 @@
+import { RegenerateDaily } from "./RegenerateDaily";
 // One report with a newspaper's structure in the site's own look: a nameplate with its 报眼 (the box
 // beside it for the issue and date), a band of the issue's figures, the front page (the lead, today's
 // highlights and the page index), then one page per section in two columns, the neighbouring issues
@@ -93,6 +94,18 @@ function Source({ c, size = 16 }: { c: ReportCitation; size?: number }) {
   );
 }
 
+/** Composition-time labels belong to this article, not its neighbouring reports. */
+export function ArticleStatus({ c }: { c: ReportCitation }) {
+  if (!c.available || !c.dailyStatus) return null;
+  const state = c.dailyStatus;
+  return <span className="mt-2 flex flex-wrap items-center gap-2 text-[12px] text-ink-4">
+    {state.selected === true && <Badge>精选</Badge>}
+    {state.hot === true && <Badge>热点</Badge>}
+    {state.fromRadar === true && <Badge>热文雷达</Badge>}
+    <span>{state.score === null ? "暂无评分" : `AI评分 ${Math.round(state.score)}`}</span>
+  </span>;
+}
+
 /**
  * The way on from a story: its original. Each story is one report (for an event, the one the edition
  * chose: first-hand first, then the best scored), so there is one place to go.
@@ -124,6 +137,7 @@ function Related({ items, className = "" }: { items: ReportCitation[]; className
               <span title={WITHDRAWN_NOTE} className="text-ink-4 line-through">{r.title}</span>
             )}
             {r.available && <span className="ml-2 text-[12px] text-ink-4">{r.sourceName}</span>}
+            <ArticleStatus c={r} />
           </span>
         </li>
       ))}
@@ -161,6 +175,7 @@ function Story({ c, dated, className = "" }: { c: ReportCitation; dated: boolean
               c.title
             )}
           </h3>
+          <ArticleStatus c={c} />
           {c.summary && <p className="mt-2 line-clamp-4 text-[15px] leading-[1.85] text-ink-2 @[560px]:text-justify">{c.summary}</p>}
           {!!c.related?.length && <Related items={c.related} className="mt-3" />}
           <div className="mt-auto pt-3">
@@ -312,6 +327,7 @@ function FrontPage({ report, pages, leadStory, count }: { report: ReportDetail; 
             <Original c={leadStory} />
           </div>
         )}
+        {leadStory && <ArticleStatus c={leadStory} />}
         {!!leadStory?.related?.length && <Related items={leadStory.related} className="order-5 mt-5 border-t border-line pt-4" />}
       </div>
 
@@ -341,6 +357,7 @@ function FrontPage({ report, pages, leadStory, count }: { report: ReportDetail; 
                       <span className="min-w-0">
                         <span className="block text-[15px] font-bold leading-[1.55] text-ink transition-colors group-hover:text-accent">{h.title}</span>
                         <span className="mt-1.5 block truncate text-[12px] text-ink-4">{h.sourceName}</span>
+                        <ArticleStatus c={h} />
                       </span>
                     </Link>
                   </li>
@@ -517,6 +534,7 @@ export function ReportPaper({ report, index }: { report: ReportDetail; index: Re
                     <span className="text-ink">{f.title}</span>
                   )}
                   {f.available && <span className="ml-2 text-[12px] text-ink-4">{f.sourceName}</span>}
+                  <ArticleStatus c={f} />
                   {f.available && f.followUp && <Badge className="ml-2 align-[1px]" title={`${monthDay(f.followUp)}的日报报道过这件事，这里是新进展`}>跟进</Badge>}
                 </span>
               </li>
@@ -535,6 +553,7 @@ export function ReportPaper({ report, index }: { report: ReportDetail; index: Re
             {daily ? "日报合订本" : `往期${REPORT_NAMES[report.kind]}`}
           </Link>
         </p>
+        {daily && <RegenerateDaily date={report.key} generatedAt={report.generatedAt} />}
       </footer>
     </article>
   );
