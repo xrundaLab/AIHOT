@@ -1,3 +1,4 @@
+import { managedPromptForRun } from "../reports/daily-prompt.ts";
 import { describePublicationTime } from "../sources/dates.ts";
 // analyzeArticle: the judging and writing steps, each with its own prompt from the industry pack
 // (industry/prompts/):
@@ -27,7 +28,7 @@ import { pageFetchable } from "../content/extract.ts";
 import { shutdownSignal } from "../jobs/queue.ts";
 import {
   buildArticlePrompt, buildLongTweetPrompt, buildShortTweetPrompt, finalizeCopy, isShortTweetInput, looksZh, MAX_BODY_CHARS, missingEvidence,
-  needsShortTweetTranslation, parseTranslateOutput, PREFILTER_SYSTEM, prefilterUser, translateInputOf, UNDERSTAND_SYSTEM, understandUser,
+  needsShortTweetTranslation, parseTranslateOutput, prefilterUser, translateInputOf, UNDERSTAND_SYSTEM, understandUser,
   type IdentityGuard,
 } from "./writing.ts";
 import { CATEGORY_GUIDE, CATEGORY_TAGS, ENTITIES, ENTITY_TAGS, ITEM_TYPES, normalizeTags, TOPIC_TAGS } from "./vocabulary.ts";
@@ -237,12 +238,12 @@ export function normalizeStructure(data: z.infer<typeof StructureSchema>, a: Ana
 
 export interface AnalysisRun {
   /** Absent when there is nothing to judge yet: only a title, and no displayable original post. */
-  prefilter: { label: "PASS" | "BLOCK" | "UNKNOWN"; reason: string; model: string; receiptId: number; reused: boolean } | null;
+  prefilter: { label: "PASS" | "BLOCK" | "UNKNOWN"; reason: string; model: string; receiptId: number; reused: boolean; promptVersion?: string } | null;
   /**
    * The independent score calls and the tier threshold they are held against; absent when the material
    * is not scored. `refused`: the model's content filter declined it, so it is not selected.
    */
-  scores: { model: string; threshold: number; values: number[]; details?: ReturnType<typeof calculateScore>[]; receiptIds: number[]; reused: boolean; refused?: boolean } | null;
+  scores: { model: string; threshold: number; values: number[]; details?: ReturnType<typeof calculateScore>[]; receiptIds: number[]; reused: boolean; refused?: boolean; promptVersion?: string } | null;
   /** The reader-facing copy: `understand` (selected, near-selected), `summarize`, `verbatim` (a Chinese short post), `none`. */
   writing: {
     kind: "understand" | "summarize" | "verbatim" | "none";
@@ -277,13 +278,14 @@ const tagged = (attemptTag: string | undefined, step: string) => [attemptTag, st
 
 async function runPrefilter(a: AnalyzeInputArticle, opts: StepOpts): Promise<NonNullable<AnalysisRun["prefilter"]>> {
   const model = await modelFor("prefilter");
+  const { system, version } = await managedPromptForRun("prefilter");
   checkAnalysisRunning();
   const res = await chatJson({
     model,
     purpose: "prefilter_article",
     subject: subjectOf(a),
-    promptVersion: PROMPT_VERSIONS.prefilter,
-    system: PREFILTER_SYSTEM,
+    promptVersion: version,
+    system,
     user: prefilterUser(a),
     schema: PrefilterSchema,
     temperature: 0,
@@ -292,7 +294,7 @@ async function runPrefilter(a: AnalyzeInputArticle, opts: StepOpts): Promise<Non
   });
   // A BLOCK without text to back it (an original post that is only media or a link) counts as UNKNOWN (which goes on).
   const label = res.data.label === "BLOCK" && missingEvidence(a) ? "UNKNOWN" : res.data.label;
-  return { label, reason: res.data.reason, model: res.model, receiptId: res.receiptId, reused: res.reused };
+  return { label, reason: res.data.reason, model: res.model, receiptId: res.receiptId, reused: res.reused, promptVersion: version };
 }
 
 /** The production prefilter step, exposed separately so SelectBench can preserve partial receipt evidence. */
@@ -319,6 +321,8 @@ async function runScores(
   onReceipt?: ReceiptObserver,
 ): Promise<NonNullable<AnalysisRun["scores"]>> {
   const model = opts.scoreModel ?? (await modelFor("score"));
+  const { system, version } = await managedPromptForRun("selection-score");
+  const promptVersion = `${version}-weights@${PROMPT_VERSIONS.score.split("-weights@").at(-1)}`;
   const call = scoreCall(model);
   const input = buildScoreInput(a);
   const values: number[] = [];
@@ -330,7 +334,7 @@ async function runScores(
     checkAnalysisRunning();
     try {
       const res = await chatJson({
-        model, purpose: "score_article", subject: subjectOf(a), promptVersion: PROMPT_VERSIONS.score, system: SCORE_SYSTEM, user: input,
+        model, purpose: "score_article", subject: subjectOf(a), promptVersion, system, user: input,
         schema: ScoreSchema, temperature: call.temperature, maxTokens: call.maxTokens, timeoutMs: call.timeoutMs,
         // Each call is its own paid request; an explicit re-evaluation gets new ones.
         attemptTag: tagged(opts.attemptTag, `score-${i + 1}`),
@@ -345,11 +349,11 @@ async function runScores(
       const receiptId = failedReceiptId(error);
       if (receiptId !== null) onReceipt?.(receiptId);
       // The model's content filter declines the material (Zhipu 1301): not scored, so not selected.
-      if (isContentFilter(error)) return { model, threshold, values, details, receiptIds, reused: false, refused: true };
+      if (isContentFilter(error)) return { model, threshold, values, details, receiptIds, promptVersion, reused: false, refused: true };
       throw error;
     }
   }
-  return { model, threshold, values, details, receiptIds, reused };
+  return { model, threshold, values, details, receiptIds, promptVersion, reused };
 }
 
 /** The production score step; its threshold stays case-specific even when an evaluator shares model output. */
@@ -633,7 +637,7 @@ export async function analyzeArticle(articleId: string, opts: StepOpts = {}): Pr
     const [row] = await tx<{ id: number }[]>`
       INSERT INTO analyses (article_id, input_revision, origin, model, prompt_version, receipt_ids, relevance, category, tags,
         subjects, title_zh, summary_zh, reason_zh, score, selected, output)
-      VALUES (${articleId}, ${input.revision}, 'model', ${w?.model ?? run.prefilter?.model ?? null}, ${ANALYZE_PROMPT_VERSION}, ${receiptIds},
+      VALUES (${articleId}, ${input.revision}, 'model', ${w?.model ?? run.prefilter?.model ?? null}, ${Object.values({ ...PROMPT_VERSIONS, prefilter: run.prefilter?.promptVersion ?? PROMPT_VERSIONS.prefilter, score: run.scores?.promptVersion ?? PROMPT_VERSIONS.score }).join("+")}, ${receiptIds},
         ${out.relevance}, ${out.category}, ${out.tags}, ${out.subjects}, ${out.titleZh}, ${out.summaryZh}, ${out.reasonZh},
         ${out.score}, ${out.selected}, ${tx.json(detail as never)})
       RETURNING id`;
