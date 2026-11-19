@@ -108,3 +108,5 @@ npm run build -w @aihot/web && node --test apps/web/tests/*.test.ts
 ```
 
 `DATABASE_URL` 指向的库名必须以 `_test` 或 `_ci` 结尾；没有会自动创建并迁移。每个测试文件在它的一份副本上并行运行，所以数据库账号要有建库权限（`CREATEDB`）。测试不访问任何外部服务：模型和付费接口都由本地假服务回答。
+
+日报可通过ServerModule.dailyCandidates读取模块提供的补充文章ID与来源记录（reports/edition.ts）。模块负责自身筛选语义；日报引擎重新检查公开资格，再与其他候选统一去重、合并、排序和审核，不直接依赖模块内部表。

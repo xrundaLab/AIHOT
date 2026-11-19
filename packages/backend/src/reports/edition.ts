@@ -1,6 +1,6 @@
 // What an issue carries. A period carries its selected reports: public, not backfill, attributed by
 // the later of arrival and release, and not released long after they happened. The daily is computed
-// by rule, without a model judging anything: one entry per event, its most authoritative report with
+// by rule before the daily suitability review: one entry per event, its most authoritative report with
 // the event's other developments listed under it; an event an earlier issue covered comes back only
 // with a new fact; an event with an official post and three or more independent participants is
 // carried even when none of its reports was selected; entries rank by importance (score, the day's
@@ -9,6 +9,7 @@
 import { addDays } from "@aihot/contracts/time";
 import { CATEGORIES } from "@aihot/industry/taxonomy";
 import { sql } from "../db.ts";
+import { serverModules, type DailySupplement } from "../modules.ts";
 import { currentSignals } from "../events/hot.ts";
 import { pickRepresentative, representativePriority, REPRESENTATIVE_COLUMNS, type RepresentativeIdentity } from "../publication/representative.ts";
 import { factSources } from "../publication/coverage.ts";
@@ -26,10 +27,6 @@ export const MAIN_ENTRIES = 12;
 export const FLASH_ENTRIES = 10;
 /** No source fills a daily: at most this many main entries lead with the same source. */
 const PER_SOURCE = 2;
-/** A follow-up of a covered event takes a full entry when this many sources carry its new facts. */
-const FOLLOW_UP_SOURCES = 4;
-/** The pack's `commentary` categories (how-tos, opinions): a follow-up of theirs is a flash, whoever wrote it. */
-const COMMENTARY = new Set<string>(CATEGORIES.filter((c) => "commentary" in c).map((c) => c.key));
 /** Earlier issues a daily remembers. */
 const MEMORY_DAYS = 7;
 
@@ -46,6 +43,12 @@ export interface ReportEntry {
   role: string;
   score: number | null;
   publishedAt: string;
+  selected?: boolean | null;
+  hot?: boolean | null;
+  fromRadar?: boolean | null;
+  hotRank?: number | null;
+  hotAt?: string | null;
+  candidateOrigins?: string[];
 }
 
 export interface Candidate extends ReportEntry {
@@ -54,10 +57,11 @@ export interface Candidate extends ReportEntry {
 }
 
 /** Another development of an entry's event, or a report of the launch it was merged with. */
-export type RelatedReport = Pick<ReportEntry, "itemId" | "factId" | "storyPublicId" | "title" | "sourceName" | "sourceUrl" | "sourceId">;
+export type RelatedReport = ReportEntry & { category?: string | null; tags?: string[]; authority?: number };
 
 /** One event of a daily as stored. */
 export interface DailyEntry extends ReportEntry {
+  supplements?: DailySupplement[];
   /** Sources that reported the event by the cutoff, this one included. */
   sources: number;
   related?: RelatedReport[];
@@ -85,12 +89,12 @@ export interface EditionEntry {
 
 type ReportRow = RepresentativeIdentity & {
   id: string; title: string; summary: string | null; url: string; category: string | null; tags: string[]; score: number | null;
-  first_party: boolean; body_mode: "full" | "summary"; timeline_at: Date;
+  first_party: boolean; selected: boolean; body_mode: "full" | "summary"; timeline_at: Date;
   source_id: string; source_name: string; source_kind: string;
   fact_id: number | null; fact_public_id: string | null; story_id: number | null; story_public_id: string | null;
 };
 
-const REPORT_FIELDS = sql`p.article_id AS id, p.title, p.summary, p.url, p.category, p.tags, p.score, (s.tier = 'T1') AS first_party, p.body_mode, p.timeline_at,
+const REPORT_FIELDS = sql`p.article_id AS id, p.title, p.summary, p.url, p.category, p.tags, p.score, p.selected, (s.tier = 'T1') AS first_party, p.body_mode, p.timeline_at,
   ${REPRESENTATIVE_COLUMNS}, s.id AS source_id, s.name AS source_name, s.kind AS source_kind,
   f.id AS fact_id, f.public_id AS fact_public_id, st.id AS story_id, st.public_id::text AS story_public_id`;
 
@@ -131,13 +135,11 @@ function reportEntry(r: ReportRow): ReportEntry {
   return {
     itemId: r.id, factId: r.fact_public_id, storyPublicId: r.story_public_id, title: r.title, summary: r.summary ?? "",
     sourceName: r.source_name, sourceUrl: r.url, sourceId: r.source_id, firstParty: r.first_party,
-    role: roleOf(r.source_kind, representativePriority(r) < 3), score: r.score, publishedAt: r.timeline_at.toISOString(),
+    role: roleOf(r.source_kind, representativePriority(r) < 3), score: r.score === null ? null : Number(r.score), selected: r.selected, fromRadar: null, publishedAt: r.timeline_at.toISOString(),
   };
 }
 
-const asRelated = (e: ReportEntry): RelatedReport => ({
-  itemId: e.itemId, factId: e.factId, storyPublicId: e.storyPublicId, title: e.title, sourceName: e.sourceName, sourceUrl: e.sourceUrl, sourceId: e.sourceId,
-});
+const asRelated = (e: ReportEntry): RelatedReport => ({ ...e });
 
 const factKeyOf = (r: ReportRow) => r.fact_public_id ?? `a:${r.id}`;
 
@@ -272,12 +274,45 @@ async function missedFacts(start: Date, end: Date): Promise<Array<{ key: string;
     .map(([key, members]) => ({ key, rows: members }));
 }
 
+/** Every event that appeared on a published board in the issue window, even if it later fell off. */
+async function hotReports(start: Date, end: Date) {
+  const boards = await sql<{ story_id: number; rank: number; at: Date }[]>`
+    SELECT (e->>'storyId')::bigint AS story_id, min((e->>'rank')::int) AS rank, min(h.computed_at) AS at
+    FROM hot_rankings h CROSS JOIN LATERAL jsonb_array_elements(h.entries) e
+    WHERE h.published AND h.computed_at >= ${start} AND h.computed_at < ${end}
+    GROUP BY (e->>'storyId')::bigint`;
+  if (!boards.length) return { rows: [] as ReportRow[], marks: new Map<number, { rank: number; at: string }>() };
+  const rows = await sql<ReportRow[]>`
+    SELECT ${REPORT_FIELDS}
+    FROM publications p JOIN sources s ON s.id = p.source_id
+    JOIN facts f ON f.id = p.fact_id AND ${ownFactEvidenceCondition()}
+    JOIN stories st ON st.id = f.story_id
+    WHERE f.story_id = ANY(${boards.map(b => b.story_id)}::bigint[]) AND st.merged_into IS NULL
+      AND ${listedCondition(new Date(end.getTime() - 1))} AND s.participation_mode = 'editorial' AND p.timeline_at < ${end}`;
+  return { rows, marks: new Map(boards.map(b => [b.story_id, { rank: b.rank, at: b.at.toISOString() }])) };
+}
+
 /** The window's public reports the editors scored: none means judging did not run there, not a quiet day. */
 async function judgedReports(start: Date, end: Date): Promise<number> {
   const [row] = await sql<{ n: number }[]>`
     SELECT count(*)::int AS n FROM publications p
     WHERE ${listedCondition(end)} AND p.score IS NOT NULL AND NOT p.backfill AND p.timeline_at >= ${start} AND p.timeline_at < ${end}`;
   return row!.n;
+}
+
+/** Modules supply identities and provenance, never a way around publication eligibility. */
+async function moduleReports(start: Date, end: Date) {
+  const contributions = (await Promise.all(serverModules().flatMap(m => m.dailyCandidates ? [m.dailyCandidates(start,end)] : []))).flat();
+  if (!contributions.length) return { rows: [] as ReportRow[], contributions: [] as DailySupplement[] };
+  const rows = await sql<ReportRow[]>`
+    SELECT ${REPORT_FIELDS}
+    FROM publications p JOIN sources s ON s.id=p.source_id
+    LEFT JOIN facts f ON f.id=p.fact_id AND ${ownFactEvidenceCondition()}
+    LEFT JOIN stories st ON st.id=f.story_id
+    WHERE p.article_id=ANY(${[...new Set(contributions.map(c=>c.articleId))]}::text[])
+      AND ${listedCondition(new Date(end.getTime()-1))} AND s.participation_mode='editorial'`;
+  const valid = new Set(rows.map(r=>r.id));
+  return { rows, contributions: contributions.filter(c=>valid.has(c.articleId)) };
 }
 
 /**
@@ -290,18 +325,35 @@ function importance(e: { score: number | null; participants: number; official: b
   return (e.score ?? 50) + 5 * Math.log2(1 + e.participants) + (e.official ? 5 : 0) - (e.followUp ? 6 : 0);
 }
 
-interface Fact { key: string; rows: ReportRow[]; selected: boolean; sources: string[]; at: number }
+interface Fact { key: string; rows: ReportRow[]; selected: boolean; origins: string[]; sources: string[]; at: number }
 
 /**
  * The daily's events for the window [start, end), most important first, before the editors' pass:
  * selected reports and missed facts, minus what the week's issues already carried, one entry per event.
  */
 export async function dailyEdition(date: string, start: Date, end: Date): Promise<{ entries: EditionEntry[]; stats: Record<string, number> }> {
-  const [memory, selected, missed, judged] = await Promise.all([dailyMemory(date), periodReports(start, end), missedFacts(start, end), judgedReports(start, end)]);
-  const raw = [
-    ...[...groupBy(selected, factKeyOf)].map(([key, rows]) => ({ key, rows, selected: true })),
-    ...missed.map((m) => ({ ...m, selected: false })),
-  ];
+  const [memory, selected, missed, judged, hot, supplements] = await Promise.all([dailyMemory(date), periodReports(start, end), missedFacts(start, end), judgedReports(start, end), hotReports(start, end), moduleReports(start,end)]);
+  // All paths join before history suppression; one fact keeps all paths and all candidate reports.
+  const joined = new Map<string, { key: string; rows: ReportRow[]; selected: boolean; origins: string[] }>();
+  const add = (rows: ReportRow[], origin: string) => {
+    for (const row of rows) {
+      const key = factKeyOf(row);
+      const f = joined.get(key) ?? { key, rows: [], selected: false, origins: [] };
+      if (!f.rows.some(r => r.id === row.id)) f.rows.push(row);
+      if (!f.origins.includes(origin)) f.origins.push(origin);
+      f.selected ||= origin === "selected";
+      joined.set(key, f);
+    }
+  };
+  add(selected, "selected");
+  add(missed.flatMap(m => m.rows), "missed");
+  add(hot.rows, "hot");
+  for (const [origin, refs] of groupBy(supplements.contributions, c=>c.origin)) {
+    const ids = new Set(refs.map(c=>c.articleId));
+    add(supplements.rows.filter(r=>ids.has(r.id)), origin);
+  }
+  const radarIds = new Set(supplements.contributions.filter(c=>c.fromRadar).map(c=>c.articleId));
+  const raw = [...joined.values()];
   const kept = raw.filter((f) => !memory.keys.has(f.key) && !f.rows.some((r) => memory.keys.has(`a:${r.id}`)));
   const factIds = [...new Set(kept.map((f) => f.rows[0]!.fact_id).filter((id): id is number => id !== null))];
   const sourcesOf = await factSources(factIds, end);
@@ -337,16 +389,24 @@ export async function dailyEdition(date: string, start: Date, end: Date): Promis
 
   const entries = events.map((fs): EditionEntry => {
     const ordered = [...fs].sort((a, b) => b.sources.length - a.sources.length || a.at - b.at || a.key.localeCompare(b.key));
+    const snapshot = (row: ReportRow) => {
+      const mark = row.story_id === null ? undefined : hot.marks.get(row.story_id);
+      return { ...reportEntry(row), category: row.category, tags: row.tags, authority: representativePriority(row),
+        fromRadar: radarIds.has(row.id),
+        hot: !!mark, hotRank: mark?.rank ?? null, hotAt: mark?.at ?? null };
+    };
     const reps = ordered.map((f) => pickRepresentative(f.rows));
     const rep = reps[0]!;
     const sourceIds = new Set(fs.flatMap((f) => f.sources));
     const storyId = rep.story_id;
     const previous = storyId === null ? null : memory.stories.get(storyId) ?? null;
-    const score = Math.max(rep.score ?? 0, ...fs.filter((f) => f.selected).flatMap((f) => f.rows.map((r) => r.score ?? 0)));
+    const score = Math.max(...fs.flatMap((f) => f.rows.map((r) => r.score ?? 0)));
     const entry: DailyEntry = {
-      ...reportEntry(rep),
+      ...snapshot(rep),
+      candidateOrigins: [...new Set(fs.flatMap(f => f.origins))],
+      supplements: supplements.contributions.filter(c=>fs.some(f=>f.rows.some(r=>r.id===c.articleId))),
       sources: sourceIds.size,
-      ...(reps.length > 1 ? { related: reps.slice(1).map((r) => asRelated(reportEntry(r))) } : {}),
+      ...(reps.length > 1 ? { related: reps.slice(1).map((r) => asRelated(snapshot(r))) } : {}),
       ...(previous ? { followUp: previous.key } : {}),
       ...(fs.every((f) => !f.selected) ? { fillIn: true as const } : {}),
     };
@@ -365,18 +425,17 @@ export async function dailyEdition(date: string, start: Date, end: Date): Promis
   entries.sort((a, b) => b.importance - a.importance || a.entry.itemId.localeCompare(b.entry.itemId));
   return {
     entries,
-    stats: { judgedReports: judged, selectedReports: selected.length, facts: raw.length, repeatsSuppressed: raw.length - kept.length, fillIns: kept.filter((f) => !f.selected).length, events: entries.length },
+    stats: { judgedReports: judged, selectedReports: selected.length, hotEvents: hot.marks.size, facts: raw.length, repeatsSuppressed: raw.length - kept.length, fillIns: kept.filter((f) => !f.selected).length, events: entries.length },
   };
 }
 
 /**
  * The issue from the ranked entries, by rule: a roundup that mentions events of this issue is listed
- * under the most important of them; a follow-up of a covered event takes a full entry only when the
- * party itself acted (not as commentary) or four or more sources carry its new facts, else it is a flash;
- * then the most important entries in full, at most two per source, and the next ones as flashes. The
+ * under the most important of them. Reviewed follow-ups compete like other entries: at most two
+ * main entries per source, then the next ones as flashes. The
  * first entry leads the issue and the next three are its highlights.
  */
-export function arrangeDaily(entries: EditionEntry[]): { main: EditionEntry[]; flashes: EditionEntry[]; stats: Record<string, number> } {
+export function mergeDaily(entries: EditionEntry[]): EditionEntry[] {
   const byStory = new Map(entries.filter((e) => e.storyId !== null).map((e) => [e.storyId!, e]));
   const under = new Map<EditionEntry, EditionEntry[]>();
   for (const e of entries) {
@@ -393,19 +452,21 @@ export function arrangeDaily(entries: EditionEntry[]): { main: EditionEntry[]; f
     const related = [...(e.entry.related ?? []), ...roundups.flatMap((r) => [asRelated(r.entry), ...(r.entry.related ?? [])])];
     return { ...e, sourceIds, entry: { ...e.entry, sources: sourceIds.size, related } };
   });
-  const earned = (e: EditionEntry) => !e.previous || (e.authority < 3 && !COMMENTARY.has(e.category ?? "")) || e.entry.sources >= FOLLOW_UP_SOURCES;
-  // A day of nothing but follow-ups still has entries in full.
-  const full = live.some(earned) ? earned : () => true;
+  return live.map(e => ({ ...e, mentions: new Set<number>() }));
+}
+
+export function arrangeDaily(entries: EditionEntry[]): { main: EditionEntry[]; flashes: EditionEntry[]; stats: Record<string, number> } {
+  const live = mergeDaily(entries);
   const main: EditionEntry[] = [];
   const rest: EditionEntry[] = [];
   const perSource = new Map<string, number>();
   for (const e of live) {
     const n = perSource.get(e.entry.sourceId) ?? 0;
-    if (main.length < MAIN_ENTRIES && n < PER_SOURCE && full(e)) {
+    if (main.length < MAIN_ENTRIES && n < PER_SOURCE) {
       main.push(e);
       perSource.set(e.entry.sourceId, n + 1);
     } else rest.push(e);
   }
   const flashes = rest.slice(0, FLASH_ENTRIES);
-  return { main, flashes, stats: { roundupsFolded: folded.size, followUpsAsFlashes: live.filter((e) => !full(e)).length, left: rest.length - flashes.length } };
+  return { main, flashes, stats: { roundupsFolded: entries.length - live.length, left: rest.length - flashes.length } };
 }

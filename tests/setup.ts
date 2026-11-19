@@ -119,3 +119,14 @@ export const tag = () => `${Date.now().toString(36)}${Math.random().toString(36)
 
 /** `seconds` after the site's edition time of a report kind on a Beijing date (EDITION_TIMES), so tests follow the site's schedule. */
 export const editionAt = (kind: keyof typeof EDITION_TIMES, date: string, seconds = 0) => new Date(beijingAt(date, EDITION_TIMES[kind]).getTime() + seconds * 1000);
+
+/** A local daily reviewer accepting each supplied article with its own summary/body evidence. */
+export function dailyReviewFixture(user: string) {
+  try {
+    const input = JSON.parse(user) as { events?: Array<{ reports: Array<{ id: string; summary: string; body?: string }> }> };
+    if (!input.events) return null;
+    return { decisions: [...new Map(input.events.flatMap(e => e.reports).map(m => [m.id, m])).values()].map(m => ({
+      id: m.id, decision: "include", reason: "fixture family relevance", quote: m.body ?? m.summary, exception: false,
+    })) };
+  } catch { return null; }
+}

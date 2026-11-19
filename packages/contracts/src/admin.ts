@@ -402,3 +402,11 @@ export interface AdminSelectBenchCases {
   rows: Array<{ case_id: string; title: string; stratum: string | null; gold: "select" | "reject" | "either"; by_model: Record<string, AdminSelectBenchDecision> }>;
   strata: Array<{ stratum: string | null; n: number }>;
 }
+
+/** Manual daily regeneration; null means no retained queue run for this date. */
+export interface AdminDailyRegeneration {
+  id: string;
+  status: "queued" | "running" | "done" | "failed";
+  finishedAt: string | null;
+  error: string | null;
+}

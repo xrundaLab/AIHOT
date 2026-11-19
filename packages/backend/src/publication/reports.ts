@@ -199,6 +199,16 @@ const goneIn = (avail: Map<string, Availability>) => new Set([...avail].filter((
 /** Items absent from this database (older than the imported window) stay cited as they were published. */
 const stillPublic = (raw: Record<string, any>, avail: Map<string, Availability>) => !raw.itemId || (avail.get(raw.itemId)?.available ?? true);
 
+/** Stored article state, never today's selection or the event's ranking score. */
+function dailyStatus(raw: Record<string, any>) {
+  return {
+    selected: typeof raw.selected === "boolean" ? raw.selected : null,
+    hot: typeof raw.hot === "boolean" ? raw.hot : null,
+    fromRadar: typeof raw.fromRadar === "boolean" ? raw.fromRadar : null,
+    score: typeof raw.score === "number" && Number.isFinite(raw.score) ? raw.score : null,
+  };
+}
+
 /** Frozen citation fields, with current source metadata and a public summary only if none was saved. */
 function citationMetadata(raw: Record<string, any>, a: Availability | undefined) {
   return {
@@ -336,7 +346,11 @@ export async function loadReport(kind: ReportKind, key: string): Promise<ReportD
   ];
   const rawItems = [...entries, ...entries.flatMap((e) => e.related ?? [])];
   const avail = await availability([...new Set(rawItems.map((i) => i.itemId).filter(Boolean))]);
-  const cite = (raw: Record<string, any>) => entryCitation(raw, avail);
+  const cite = (raw: Record<string, any>) => {
+    const citation = entryCitation(raw, avail);
+    return kind === "daily" ? { ...citation, dailyStatus: dailyStatus(raw),
+      ...(citation.related ? { related: citation.related.map((item, i) => ({ ...item, dailyStatus: dailyStatus(raw.related[i]) })) } : {}) } : citation;
+  };
 
   const sections: ReportDetail["sections"] = kind === "daily"
     ? (c.sections ?? []).map((s: any) => ({ label: String(s.label), summary: null, items: (s.items ?? []).map(cite) }))
@@ -484,10 +498,15 @@ export async function dailyWithNotes(date: string | "latest") {
       windowEnd: r.window_end.toISOString(),
       links: { aihot: url },
       attribution: attribution(url),
-      lead: lead ? { title: lead.title, leadParagraph: lead.leadParagraph ?? "" } : null,
+      lead: lead ? { itemId: lead.itemId, title: lead.title, leadParagraph: lead.leadParagraph ?? "",
+        ...dailyStatus(raw.find((i: any) => i.itemId === lead.itemId) ?? {}) } : null,
       sections: (c.sections ?? []).map((s: any) => ({
         label: String(s.label),
         items: (s.items ?? []).filter(ok).map((i: any) => ({
+          itemId: i.itemId ?? null,
+          ...dailyStatus(i),
+          related: (i.related ?? []).filter(ok).map((r: any) => ({ itemId: r.itemId ?? null, title: String(r.title),
+            source: { name: metadata(r).sourceName }, links: links(r), ...dailyStatus(r) })),
           title: String(i.title),
           summary: String(metadata(i).summary ?? ""),
           source: { name: metadata(i).sourceName },
@@ -496,6 +515,10 @@ export async function dailyWithNotes(date: string | "latest") {
         })),
       })),
       flashes: (c.flashes ?? []).filter(ok).map((i: any) => ({
+        itemId: i.itemId ?? null,
+        ...dailyStatus(i),
+        related: (i.related ?? []).filter(ok).map((r: any) => ({ itemId: r.itemId ?? null, title: String(r.title),
+          source: { name: metadata(r).sourceName }, links: links(r), ...dailyStatus(r) })),
         title: String(i.title),
         source: { name: metadata(i).sourceName },
         links: links(i),

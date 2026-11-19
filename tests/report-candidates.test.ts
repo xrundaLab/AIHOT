@@ -1,4 +1,4 @@
-import { editionAt, gate, tag } from "./setup.ts";
+import { dailyReviewFixture, editionAt, gate, stub, tag } from "./setup.ts";
 // A selected item released across the daily edition time must appear in the next issue exactly once.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
@@ -8,16 +8,20 @@ import { upsertMaterial } from "@aihot/backend/content/materials";
 import { stopBoss } from "@aihot/backend/jobs/queue";
 import { publishArticle, publishArticleTx } from "@aihot/backend/publication/publish";
 import { composeDaily } from "@aihot/backend/reports/compose";
-import { candidates } from "@aihot/backend/reports/edition";
+import { dailyEdition, candidates } from "@aihot/backend/reports/edition";
 
 const T = tag();
 const SOURCE = `test-report-boundary-${T}`;
 
+const provider = await stub((_hit, req) => ({ choices: [{ message: { content: JSON.stringify(dailyReviewFixture(JSON.parse(req.body).messages.at(-1).content)) } }] }));
+process.env.DEEPSEEK_BASE_URL = `${provider.url}/v1`;
+process.env.DEEPSEEK_API_KEY = "test-key";
 before(async () => {
   await sql`INSERT INTO sources (id, name, kind, tier, participation_mode, next_fetch_at)
             VALUES (${SOURCE}, 'Report boundary test', 'rss', 'T1', 'editorial', '2100-01-01')`;
 });
 after(async () => {
+  await provider.close();
   await stopBoss();
   await closeDb();
 });
@@ -177,4 +181,28 @@ test("daily composition waits for a pre-cutoff release to commit instead of losi
     commit.open();
     await Promise.allSettled([publication, report]);
   }
+});
+
+test("an event seen only on an earlier hot board enters the daily without selection or official source", async () => {
+  const id = await analyzed("hot-unselected", editionAt("daily", "2020-03-02", -3600));
+  await sql`UPDATE analyses SET selected=false WHERE article_id=${id}`;
+  await sql`UPDATE sources SET tier='T2' WHERE id=${SOURCE}`;
+  await publishArticle(id);
+  const [story] = await sql`INSERT INTO stories(public_id,title) VALUES(${crypto.randomUUID()},'family hot event') RETURNING id`;
+  const [fact] = await sql`INSERT INTO facts(public_id,title,story_id) VALUES(${`hot-fact-${T}`},'new family fact',${story!.id}) RETURNING id`;
+  await sql`INSERT INTO fact_articles(fact_id,article_id,role) VALUES(${fact!.id},${id},'report')`;
+  await publishArticle(id);
+  const first = editionAt("daily", "2020-03-02", -1800);
+  const end = editionAt("daily", "2020-03-02");
+  await sql`INSERT INTO hot_rankings(computed_at,rule_version,entries,published)
+    VALUES(${first},'test',${sql.json([{ storyId: story!.id, rank: 3 }])},true),
+          (${editionAt("daily", "2020-03-02", -600)},'test','[]',true)`;
+  const result = await dailyEdition("2020-03-02", editionAt("daily", "2020-03-01"), end);
+  const entry = result.entries.find(e => e.entry.itemId === id)!;
+  assert.ok(entry, "falling off the last board must not remove the candidate");
+  assert.equal(entry.entry.selected, false); assert.equal(entry.entry.hot, true);
+  assert.equal(entry.entry.hotRank, 3);
+  assert.deepEqual(entry.entry.candidateOrigins, ["hot"]);
+  await sql`UPDATE publications SET visibility='withdrawn' WHERE article_id=${id}`;
+  assert.equal((await dailyEdition("2020-03-02", editionAt("daily", "2020-03-01"), end)).entries.some(e => e.entry.itemId === id), false);
 });

@@ -14,6 +14,7 @@ let boss: PgBoss | null = null;
 let starting: Promise<PgBoss> | null = null;
 
 export interface JobData {
+  "reports.regenerate-daily": { date: string; actor: string; reason: string; requestId: string };
   "content.analyze": { articleId: string; attemptTag?: string };
   "content.extract-body": { articleId: string; force?: boolean };
   "events.group": { articleId: string; signalOnly?: boolean };
@@ -28,6 +29,7 @@ export interface JobData {
 export type QueueName = keyof JobData;
 
 export const QUEUES = {
+  regenerateDaily: "reports.regenerate-daily",
   analyze: "content.analyze",
   extractBody: "content.extract-body",
   group: "events.group",
@@ -44,6 +46,7 @@ export type QueueOptions = NonNullable<Parameters<PgBoss["createQueue"]>[1]>;
 
 /** Queue definitions in one place; created on first use by any process. */
 const QUEUE_OPTIONS: Record<QueueName, QueueOptions> = {
+  [QUEUES.regenerateDaily]: { policy: "short", retryLimit: 1, retryDelay: 60, expireInSeconds: 3600 },
   [QUEUES.analyze]: { policy: "short", retryLimit: 4, retryDelay: 30, retryBackoff: true, expireInSeconds: 600 },
   [QUEUES.extractBody]: { policy: "short", retryLimit: 2, retryDelay: 120, expireInSeconds: 300 },
   [QUEUES.group]: { policy: "short", retryLimit: 4, retryDelay: 20, retryBackoff: true, expireInSeconds: 600 },

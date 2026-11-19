@@ -157,3 +157,25 @@ test("bad admin input is a client error and never starts processing", async () =
   const [state] = await sql`SELECT processing_state FROM articles WHERE id = ${id}`;
   assert.equal(state!.processing_state, "analyzed");
 });
+
+test("daily regeneration is authenticated, CSRF protected and coalesces concurrent administrator clicks", async () => {
+  const date = "2026-01-02";
+  await sql`INSERT INTO reports(kind,key,window_start,window_end,content,generated_at)
+    VALUES('daily',${date},'2026-01-01','2026-01-02','{}',now())`;
+  const { devAdmin } = config;
+  try {
+    config.devAdmin = null;
+    assert.equal((await app.inject({ method: "POST", url: `/api/admin/reports/daily/${date}/regenerate` })).statusCode, 401);
+    config.devAdmin = { displayName: "Report tester" };
+    assert.equal((await app.inject({ method: "POST", url: `/api/admin/reports/daily/${date}/regenerate` })).statusCode, 403);
+    const responses = await Promise.all(Array.from({ length: 3 }, () => app.inject({ method: "POST", url: `/api/admin/reports/daily/${date}/regenerate`, headers: { "x-csrf-token": "dev" } })));
+    assert.ok(responses.every(r => r.statusCode === 200), responses.map(r => r.body).join("\n"));
+    assert.equal(new Set(responses.map(r => r.json().run.id)).size, 1);
+    const jobs = await sql`SELECT id FROM pgboss.job WHERE name='reports.regenerate-daily' AND data->>'date'=${date}`;
+    assert.equal(jobs.length, 1);
+    const status = await app.inject({ method: "GET", url: `/api/admin/reports/daily/${date}/regeneration` });
+    assert.equal(status.json().run.status, "queued");
+    const bad = await app.inject({ method: "POST", url: "/api/admin/reports/daily/2026-02-30/regenerate", headers: { "x-csrf-token": "dev" } });
+    assert.equal(bad.statusCode, 400);
+  } finally { config.devAdmin = devAdmin; }
+});

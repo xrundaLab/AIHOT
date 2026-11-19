@@ -179,6 +179,15 @@ export interface RequestNotices {
   feed: (req: FastifyRequest, feedPath: string) => FeedNotice | null;
 }
 
+/** Module-owned candidate provenance; the report engine independently checks public eligibility. */
+export interface DailySupplement {
+  articleId: string;
+  origin: string;
+  observedAt: string;
+  rank: number;
+  fromRadar?: boolean;
+}
+
 export interface ServerModule {
   /** Its folder under modules/. */
   name: string;
@@ -186,6 +195,8 @@ export interface ServerModule {
   independentSelectedSources?: readonly string[];
   /** Aggregated sources that cannot confer full-text permission for their members. */
   summaryOnlySources?: readonly string[];
+  /** Extra daily candidates in [start,end), consumed by reports/edition.ts before history suppression. */
+  dailyCandidates?: (start: Date, end: Date) => Promise<DailySupplement[]>;
   /** Explicit site policy for listing undated material without making it selectable. */
   listUndated?: (articleId: string, db: Db) => Promise<boolean>;
   /** Optional pool filter and card annotation supplied by a site's module. */

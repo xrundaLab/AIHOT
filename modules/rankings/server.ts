@@ -1,6 +1,6 @@
 import { defineServerModule } from "@aihot/backend/modules";
 import { collectRankings, collectWxRankings, collectTopRankings } from "./backend/collect.ts";
-import { loadRankings } from "./backend/publication.ts";
+import { loadRankings, radarDailyCandidates } from "./backend/publication.ts";
 import { loadRadarHistory, validHistoryDate } from "./backend/history.ts";
 import type { FastifyRequest, FastifyReply } from "fastify";
 import { sessionPrincipal, actorOf } from "@aihot/backend/admin/auth";
@@ -12,6 +12,7 @@ import { claimExternalTask, processRadarBodies, processRadarPublications, submit
 import { screenRankings } from "./backend/screen.ts";
 export const rankingsServer = defineServerModule({
   name: "rankings",
+  dailyCandidates: radarDailyCandidates,
   summaryOnlySources: ["radar-discovery"],
   async listUndated(articleId, db) {
     const [row] = await db`SELECT 1 FROM articles a JOIN sources s ON s.id=a.source_id

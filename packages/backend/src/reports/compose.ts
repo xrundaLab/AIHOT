@@ -1,8 +1,10 @@
 // Daily, weekly and monthly reports. Windows are Beijing calendar based and written into the report;
 // missed schedule points are caught up; regeneration creates a revision. What every issue carries is
-// decided by rule: a daily from edition.ts without a model; a weekly or monthly is compiled from its
+// decided by rule: a daily from edition.ts with a suitability review; a weekly or monthly is compiled from its
 // dailies and a model only writes its overview and introductions, from the brief in the industry pack
 // (industry/prompts/report-period*.md).
+import { Conflict } from "../audit.ts";
+import { reviewDaily } from "./review.ts";
 import { z } from "zod";
 import { EDITION_TIMES, REPORTS, SITE } from "@aihot/site";
 import { PLAIN_TERMS, RELEASE } from "@aihot/industry/taxonomy";
@@ -16,7 +18,7 @@ import { chatJson } from "../providers/llm.ts";
 import { completeReceipt } from "../providers/receipts.ts";
 import { shutdownSignal } from "../jobs/queue.ts";
 import { emit } from "../modules.ts";
-import { arrangeDaily, candidates, dailyEdition, periodEntries, sectionOf, SECTION_ORDER, type Candidate, type EditionEntry } from "./edition.ts";
+import { arrangeDaily, mergeDaily, candidates, dailyEdition, periodEntries, sectionOf, SECTION_ORDER, type Candidate, type EditionEntry } from "./edition.ts";
 
 export const REPORT_VERSION = promptVersion("report-period", "report-period-sections", "report-period-no-sections");
 
@@ -86,7 +88,18 @@ function windowPoint(at: Date): string {
  * the editors judged with nothing new in it still has its issue: no entries, and a lead that says so
  * (REPORTS.quiet).
  */
-export async function composeDaily(date: string, reason?: string): Promise<{ key: string; entries: number }> {
+export async function composeDaily(date: string, reason?: string, attemptTag?: string): Promise<{ key: string; entries: number }> {
+  const connection = await sql.reserve();
+  const key = `compose:daily:${date}`;
+  try {
+    const [lock] = await connection`SELECT pg_try_advisory_lock(hashtext(${key})) AS acquired`;
+    if (!lock?.acquired) throw new Conflict("该期日报正在生成，请稍后查看结果");
+    try { return await composeDailyLocked(date, reason, attemptTag); }
+    finally { await connection`SELECT pg_advisory_unlock(hashtext(${key}))`; }
+  } finally { connection.release(); }
+}
+
+async function composeDailyLocked(date: string, reason?: string, attemptTag?: string): Promise<{ key: string; entries: number }> {
   const previous = await savedReport("daily", date);
   if (previous && reason === undefined) return { key: date, entries: previous.entries };
   const end = beijingAt(date, EDITION_TIMES.daily);
@@ -94,7 +107,8 @@ export async function composeDaily(date: string, reason?: string): Promise<{ key
   const edition = await dailyEdition(date, start, end);
   // Nothing judged in the window is a failure upstream, not a quiet day: the run fails and is caught up later.
   if (edition.entries.length === 0 && edition.stats.judgedReports === 0) throw new Error(`daily ${date}: nothing judged in its window`);
-  const issue = arrangeDaily(edition.entries);
+  const review = await reviewDaily(date, mergeDaily(edition.entries), attemptTag);
+  const issue = arrangeDaily(review.entries);
   const [lead, ...rest] = issue.main;
   const content = {
     date,
@@ -110,9 +124,10 @@ export async function composeDaily(date: string, reason?: string): Promise<{ key
     metrics: dailyMetrics(issue.main),
     windowStart: start.toISOString(),
     windowEnd: end.toISOString(),
-    generator: { version: REPORT_VERSION, ...edition.stats, ...issue.stats },
+    generator: { version: review.version, model: review.model, reviewedEvents: review.reviewedEvents, ...edition.stats, ...issue.stats },
+    suitability: review.decisions,
   };
-  await saveReport("daily", date, start, end, content, reason, null, []);
+  await saveReport("daily", date, start, end, content, reason, review.model, review.receiptIds);
   return { key: date, entries: issue.main.length };
 }
 

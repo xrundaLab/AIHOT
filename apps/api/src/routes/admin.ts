@@ -1,3 +1,4 @@
+import { dailyRegeneration, requestDailyRegeneration } from "@aihot/backend/reports/regenerate";
 // /api/admin/*: queries are GET, creation POST, edits PATCH, business commands POST.
 // Every route goes through adminHandler (session + CSRF); manual changes are audited in the modules.
 import { readFile } from "node:fs/promises";
@@ -52,6 +53,10 @@ function decodeImage(dataUrl: unknown): Buffer {
 
 export function registerAdmin(app: FastifyInstance) {
   // Sources
+  app.get("/api/admin/reports/daily/:date/regeneration", adminHandler(async (req) => ({ run: await dailyRegeneration(param(req, "date")) })));
+  app.post("/api/admin/reports/daily/:date/regenerate", adminHandler(async (req, _reply, admin) => ({
+    run: await requestDailyRegeneration(param(req, "date"), actorOf(admin), String(req.headers["idempotency-key"] ?? req.id)),
+  })));
   app.get("/api/admin/sources", adminHandler(async (req) => {
     const f = q(req);
     return listSources({ q: f.q, kind: f.kind, health: f.health, mode: f.mode, enabled: f.enabled as "true" | "false" | undefined, page: page(req) });

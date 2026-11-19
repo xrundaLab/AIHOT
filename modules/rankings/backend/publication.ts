@@ -4,6 +4,33 @@ import { publicSourceName } from "@aihot/backend/publication/rules";
 import { otherBoards, total, type Entry } from "./tunbang.ts";
 import { topBoards } from "./tophub.ts";
 import type { RankingJudgement } from "./screen.ts";
+import type { DailySupplement } from "@aihot/backend/modules";
+
+/** The radar is the saved A set, not every raw board entry or only the latest snapshot. */
+export async function radarDailyCandidates(start: Date, end: Date): Promise<DailySupplement[]> {
+  const rows = await sql<{ article_id: string; observed_at: Date; rank: number }[]>`
+    SELECT DISTINCT ON (p.article_id) p.article_id,r.fetched_at AS observed_at,(j.value->>'rank')::int AS rank
+    FROM external_ranking_snapshots r
+    JOIN LATERAL jsonb_array_elements(coalesce(r.results,'[]'::jsonb)) WITH ORDINALITY j(value,ord)
+      ON true
+    LEFT JOIN radar_body_occurrences o ON o.snapshot_id=r.id AND j.value->>'rank'=o.rank::text
+    LEFT JOIN radar_body_tasks t ON t.id=o.task_id
+    JOIN publications p ON p.article_id=t.article_id OR (
+      t.article_id IS NULL AND p.url=r.items->((j.ord-1)::int)->>'url'
+      AND NOT EXISTS (SELECT 1 FROM publications other WHERE other.url=p.url AND other.article_id<>p.article_id))
+    JOIN articles a ON a.id=p.article_id
+    JOIN sources s ON s.id=p.source_id
+    WHERE r.status='complete' AND r.fetched_at>=${start} AND r.fetched_at<${end}
+      AND j.value->>'level'='A'
+      AND r.items->((j.ord-1)::int)->>'rank'=j.value->>'rank'
+      AND r.items->((j.ord-1)::int)->>'title'=j.value->>'title'
+      AND ${listedCondition(new Date(end.getTime()-1))} AND s.participation_mode='editorial'
+      AND a.body_status='ok' AND nullif(trim(a.body_text),'') IS NOT NULL
+      AND nullif(trim(p.summary),'') IS NOT NULL
+    ORDER BY p.article_id,r.fetched_at,(j.value->>'rank')::int,r.id`;
+  return rows.map(row => ({ articleId: row.article_id, origin: "radar", fromRadar: true,
+    observedAt: row.observed_at.toISOString(), rank: row.rank }));
+}
 
 export interface Ranking { id: string; name: string; source: string; url: string; items: Entry[]; sourceUpdated: string | null; fetchedAt: string | null; failed: boolean; unavailable?: string; screenStatus?: "pending" | "processing" | "complete" | "failed" | null; screenRuleVersion?: string | null; judgements?: RankingJudgement[] | null }
 

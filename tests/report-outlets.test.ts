@@ -61,7 +61,7 @@ test('withdrawing a named lead preserves the replacement headline and its own fr
   await sql`UPDATE publications SET visibility = 'withdrawn' WHERE article_id = ${removed.itemId}`;
   const outlets = await dailyOutlets(key);
   for (const [name, lead] of Object.entries({ site: outlets.site!.lead, v1: outlets.v1.lead, index: { title: outlets.index.leadTitle, leadParagraph: outlets.index.leadParagraph }, feed: { title: outlets.feed.headline, leadParagraph: outlets.feed.leadParagraph } })) {
-    assert.deepEqual(lead, { title: replacement.title, leadParagraph: replacement.summary }, name);
+    assert.deepEqual(lead && { title: lead.title, leadParagraph: lead.leadParagraph }, { title: replacement.title, leadParagraph: replacement.summary }, name);
   }
   assert.ok(outlets.agent.includes(replacement.summary));
   assert.ok((await reportFeed('daily')).includes(replacement.summary));
@@ -78,7 +78,7 @@ test('a historical written daily lead follows withdrawal of the citation it desc
   await sql`UPDATE publications SET visibility = 'withdrawn' WHERE article_id = ${removed.itemId}`;
   const outlets = await dailyOutlets(key);
   for (const [name, lead] of Object.entries({ site: outlets.site!.lead, v1: outlets.v1.lead, index: { title: outlets.index.leadTitle, leadParagraph: outlets.index.leadParagraph }, feed: { title: outlets.feed.headline, leadParagraph: outlets.feed.leadParagraph } })) {
-    assert.deepEqual(lead, { title: replacement.title, leadParagraph: replacement.summary }, name);
+    assert.deepEqual(lead && { title: lead.title, leadParagraph: lead.leadParagraph }, { title: replacement.title, leadParagraph: replacement.summary }, name);
   }
   assert.ok(!outlets.agent.includes(removed.title));
 });
@@ -222,4 +222,24 @@ test('an expired report index waits for the current withdrawal result',async(t)=
   await sql`UPDATE publications SET visibility='withdrawn' WHERE article_id=${removed.itemId}`;
   t.mock.timers.tick(60_001);
   assert.equal((await v1Dailies(50)).items.find(r=>r.date===key)!.leadTitle,replacement.title);
+});
+
+test('daily article state is a snapshot, not current selection or an event maximum score', async () => {
+  const main = await citation('snapshot main');
+  const related = await citation('snapshot related');
+  const raw = { ...main, selected: false, hot: true, fromRadar: null, score: 41,
+    related: [{ ...related, selected: true, hot: true, fromRadar: null, score: 87 }] };
+  await issue('daily', '2026-08-17', { leadItemId: main.itemId, sections: [{ label: '资讯', items: [raw] }], flashes: [] });
+  const before = await v1Daily('2026-08-17');
+  const item = before!.report.sections[0]!.items[0]!;
+  assert.equal(item.itemId, main.itemId); assert.equal(item.selected, false); assert.equal(item.hot, true);
+  assert.equal(item.score, 41); assert.equal(item.related[0].score, 87);
+  assert.equal(before!.report.lead?.itemId, main.itemId);
+  await sql`UPDATE publications SET selected=true,score=99 WHERE article_id=${main.itemId}`;
+  const site = await loadReport('daily', '2026-08-17');
+  assert.deepEqual(site!.sections[0]!.items[0]!.dailyStatus, { selected: false, hot: true, fromRadar: null, score: 41 });
+  const legacy = await citation('legacy');
+  await issue('daily', '2026-08-18', { sections: [{ label: '资讯', items: [legacy] }] });
+  const old = (await v1Daily('2026-08-18'))!.report.sections[0]!.items[0]!;
+  assert.equal(old.selected, null); assert.equal(old.hot, null); assert.equal(old.score, null);
 });

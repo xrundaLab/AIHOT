@@ -56,3 +56,71 @@ test("history endpoint validates dates and pagination", async () => {
     assert.equal(res.headers['cache-control'], 'public, max-age=60');
   } finally { await app.close(); }
 });
+
+import { radarDailyCandidates } from "../backend/publication.ts";
+
+test("daily radar candidates use in-window completed A snapshots and public article associations", async () => {
+  const from = new Date('2026-11-23T00:00:00Z'), to = new Date('2026-11-24T00:00:00Z');
+  await sql`INSERT INTO sources(id,name,kind,participation_mode) VALUES ('daily-radar-source','radar article source','rss','editorial')`;
+  const article = async (id: string, visibility = 'public') => {
+    await sql`INSERT INTO articles(id,source_id,identity_key,url,title,discovered_at,timeline_at,body_status,body_text)
+      VALUES(${id},'daily-radar-source',${id},${`https://example.org/${id}`},${id},${from},${from},'ok','confirmed article body')`;
+    await sql`INSERT INTO publications(article_id,source_id,title,summary,url,channel,visibility,eligible,selected,discovered_at,timeline_at,sort_at)
+      VALUES(${id},'daily-radar-source',${id},'family summary',${`https://example.org/${id}`},'news',${visibility},true,false,${from},${from},${from})`;
+    const [task] = await sql`INSERT INTO radar_body_tasks(identity_key,article_id,title,url,origin,state)
+      VALUES(${id},${id},${id},${`https://example.org/${id}`},'radar original','complete') RETURNING id`;
+    return task!.id as number;
+  };
+  const a = await article('daily-radar-a');
+  const b = await article('daily-radar-b');
+  const withdrawn = await article('daily-radar-withdrawn', 'withdrawn');
+  const occurrences = async (at: Date, status: string, rows: Array<{ id: string; task: number; level: 'A'|'B' }>) => {
+    const entries = rows.map((r,i) => item(i+1,r.id,`https://example.org/${r.id}`));
+    const [s] = await sql`INSERT INTO external_ranking_snapshots(board_id,name,source,url,items,results,status,fetched_at,rule_version,rule_prompt)
+      VALUES('daily-radar-test','daily radar','test','https://example.org',${sql.json(entries)},${sql.json(rows.map((r,i) => judgment(i+1,r.id,r.level)))},${status},${at},'v1','test') RETURNING id`;
+    for (let i=0; i<rows.length; i++) await sql`INSERT INTO radar_body_occurrences(snapshot_id,rank,task_id) VALUES(${s!.id},${i+1},${rows[i]!.task})`;
+  };
+  await occurrences(from,'complete',[{id:'daily-radar-a',task:a,level:'A'},{id:'daily-radar-b',task:b,level:'B'}, {id:'daily-radar-withdrawn',task:withdrawn,level:'A'}]);
+  await occurrences(new Date(from.getTime()+1000),'complete',[{id:'daily-radar-a',task:a,level:'A'}]);
+  const edge = await article('daily-radar-end');
+  await occurrences(to,'complete',[{id:'daily-radar-end',task:edge,level:'A'}]);
+  const pending = await article('daily-radar-pending');
+  await occurrences(new Date(from.getTime()+2000),'pending',[{id:'daily-radar-pending',task:pending,level:'A'}]);
+  const candidates = await radarDailyCandidates(from,to);
+  assert.deepEqual(candidates.map(x=>x.articleId), ['daily-radar-a']);
+  assert.equal(candidates[0]!.fromRadar,true);
+  assert.equal(candidates[0]!.origin,'radar');
+  assert.equal(candidates[0]!.observedAt,from.toISOString());
+  const { dailyEdition } = await import("@aihot/backend/reports/edition");
+  const { installModules, serverModules } = await import("@aihot/backend/modules");
+  const { rankingsServer } = await import("../server.ts");
+  const previous = serverModules();
+  installModules([rankingsServer]);
+  try {
+    let edition = await dailyEdition('2026-11-24',from,to);
+    assert.equal(edition.entries.length,1);
+    assert.equal(edition.entries[0]!.entry.fromRadar,true);
+    assert.deepEqual(edition.entries[0]!.entry.candidateOrigins,['radar']);
+    await sql`UPDATE publications SET selected=true,visible_after=${from} WHERE article_id='daily-radar-a'`;
+    edition = await dailyEdition('2026-11-24',from,to);
+    assert.equal(edition.entries.length,1,'selection and radar converge before history suppression');
+    assert.deepEqual(edition.entries[0]!.entry.candidateOrigins,['selected','radar']);
+    assert.equal(edition.entries[0]!.entry.fromRadar,true);
+    await sql`INSERT INTO reports(kind,key,window_start,window_end,content,generated_at)
+      VALUES('daily','2026-11-23',${from},${from},${sql.json({sections:[{label:'news',items:[{itemId:'daily-radar-a'}]}]})},${from})`;
+    assert.equal((await dailyEdition('2026-11-24',from,to)).entries.length,0,'previous daily removes the same article after all paths merge');
+  } finally { installModules(previous); }
+  await article('daily-radar-legacy');
+  await snapshot('daily-radar-legacy-board','legacy','2026-11-25T01:00:00Z',
+    [item(1,'legacy A','https://example.org/daily-radar-legacy')],[judgment(1,'legacy A')]);
+  const legacyFrom=new Date('2026-11-25T00:00:00Z'), legacyTo=new Date('2026-11-26T00:00:00Z');
+  assert.deepEqual((await radarDailyCandidates(legacyFrom,legacyTo)).map(x=>x.articleId),['daily-radar-legacy']);
+  await sql`UPDATE articles SET body_status='pending' WHERE id='daily-radar-legacy'`;
+  assert.deepEqual(await radarDailyCandidates(legacyFrom,legacyTo),[],'unfinished bodies do not become daily candidates');
+  await sql`UPDATE articles SET body_status='ok' WHERE id='daily-radar-legacy'`;
+  await article('daily-radar-duplicate');
+  await sql`UPDATE publications SET url='https://example.org/daily-radar-legacy' WHERE article_id='daily-radar-duplicate'`;
+  assert.deepEqual(await radarDailyCandidates(legacyFrom,legacyTo),[],'an ambiguous legacy URL must not guess an article');
+  await sql`UPDATE sources SET participation_mode='isolated' WHERE id='daily-radar-source'`;
+  assert.deepEqual(await radarDailyCandidates(from,to), []);
+});

@@ -293,8 +293,18 @@ export function reportDateLabel(kind: ReportKind, key: string): string {
   return `${monthDay(start)}—${start.slice(5, 7) === end.slice(5, 7) ? `${Number(end.slice(8, 10))}日` : monthDay(end)}`;
 }
 
+export interface DailyArticleStatus {
+  /** Snapshot at composition time; null means the issue did not record this value. */
+  selected: boolean | null;
+  hot: boolean | null;
+  fromRadar: boolean | null;
+  score: number | null;
+}
+
 export interface ReportCitation {
   itemId: string | null;
+  /** Present for daily citations, including unknown values in legacy issues. */
+  dailyStatus?: DailyArticleStatus;
   title: string;
   summary: string | null;
   sourceName: string;

@@ -1,4 +1,6 @@
 // Publication jobs: re-deriving a whole source after an admin change.
+import { composeDaily } from "../reports/compose.ts";
+import { audit } from "../audit.ts";
 import type { PgBoss } from "pg-boss";
 import { sql, type Db } from "../db.ts";
 import { republishSource } from "../publication/publish.ts";
@@ -21,6 +23,11 @@ async function progress(sourceId: string, value: Record<string, unknown>) {
 }
 
 export async function registerPublicationJobs(boss: PgBoss) {
+  await work(boss, QUEUES.regenerateDaily, { localConcurrency: 1, pollingIntervalSeconds: 2 }, async ({ date, actor, reason, requestId }) => {
+    const result = await composeDaily(date, `${reason}（${actor}）`, requestId);
+    await audit(actor, "report.regenerate.complete", `report:daily:${date}`, reason, null, result, { requestId });
+    return result;
+  });
   await work(boss, QUEUES.republishSource, { localConcurrency: 1, pollingIntervalSeconds: 2 }, async ({ sourceId }) => {
     const startedAt = new Date().toISOString();
     await progress(sourceId, { status: "running", done: 0, total: null, startedAt });
