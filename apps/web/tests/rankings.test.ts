@@ -10,7 +10,14 @@ const boards = [
   { ...common, id: "fixture:failed", name: "判断失败榜单", source: "测试", url: "https://example.org/", screenStatus: "failed", items: [{ rank: 9, title: "失败榜单标题", url: null, heat: "", origin: "" }] },
 ];
 let web: WebServer; let browser: Browser;
-before(async () => { web = await startWebServer(fakeApi(url => url.pathname === "/api/site/rankings" ? { boards } : undefined)); browser = await chromium.launch({ channel: "chromium" }); });
+before(async () => { web = await startWebServer(fakeApi(url => {
+  if (url.pathname === "/api/site/rankings") return { boards };
+  if (url.pathname === "/api/site/rankings/history") {
+    const date = url.searchParams.get("date"), source = url.searchParams.get("source"), board = url.searchParams.get("board"), page = Number(url.searchParams.get("page") || 1);
+    return { date, source, board, sources: ["豚榜", "微小榜"], boards: [{ id: "tunbang:all", name: "全网热搜总榜", source: "豚榜" }], page, pageCount: 2, total: 31,
+      items: [{ title: page === 1 ? "历史热点" : "第二页热点", url: "https://example.org/history", detailUrl: "/items/history", origin: "来源", firstAt: "2026-11-19T00:00:00Z", lastAt: "2026-11-19T02:00:00Z", occurrences: [{ source: "豚榜", board: "全网热搜总榜", boardId: "tunbang:all", rank: 1, fetchedAt: "2026-11-19T02:00:00Z", judgement: { rank: 1, title: "历史热点", level: "A", reason: "当时的判断", caution: "当时的提示", related_ranks: [] } }] }] };
+  }
+})); browser = await chromium.launch({ channel: "chromium" }); });
 after(async () => { await browser?.close(); await web?.stop(); });
 for (const width of [393, 1200]) test(`rankings search and selection at ${width}px`, async () => {
   const page = await browser.newPage({ viewport: { width, height: 850 } });
@@ -68,5 +75,29 @@ for (const width of [393, 1200]) test(`radar groups only matching A judgements a
     await card.getByRole("link", { name: "查看完整榜单 →" }).click();
     await expect(page).toHaveURL(/board=tunbang/);
     await expect(page.getByText("其他线索")).toBeVisible();
+  } finally { await page.close(); }
+});
+
+for (const width of [393, 1200]) test(`radar history filters and preserves saved judgments at ${width}px`, async () => {
+  const page = await browser.newPage({ viewport: { width, height: 850 } });
+  try {
+    await visit(page, `${web.origin}/rankings?board=family%3Aradar`);
+    await page.getByRole("link", { name: "历史记录" }).click();
+    await expect(page.getByRole("region", { name: "热文雷达历史记录" })).toBeVisible();
+    await page.getByLabel("采集日期").fill("2026-11-19");
+    await expect(page).toHaveURL(/date=2026-11-19/);
+    await page.getByLabel("历史来源").selectOption("豚榜");
+    await page.getByLabel("历史榜单").selectOption("tunbang:all");
+    await expect(page.getByRole("link", { name: "历史热点" })).toHaveAttribute("href", "/items/history");
+    await page.getByText("查看上榜与判断记录").click();
+    await expect(page.getByText("当时的判断")).toBeVisible();
+    await page.getByRole("link", { name: "下一页" }).click();
+    await expect(page).toHaveURL(/page=2/);
+    await expect(page.getByText("第二页热点")).toBeVisible();
+    await expect(page.getByLabel("历史来源")).toHaveValue("豚榜");
+    const size = await page.evaluate(() => ({ width: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth }));
+    if (size.scroll > size.width + 1) throw new Error(`page overflows: ${size.scroll} > ${size.width}`);
+    await page.getByRole("link", { name: "最新", exact: true }).click();
+    await expect(page.getByText("测试热点")).toBeVisible();
   } finally { await page.close(); }
 });

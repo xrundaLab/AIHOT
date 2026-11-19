@@ -1,6 +1,7 @@
 import { defineServerModule } from "@aihot/backend/modules";
 import { collectRankings, collectWxRankings, collectTopRankings } from "./backend/collect.ts";
 import { loadRankings } from "./backend/publication.ts";
+import { loadRadarHistory, validHistoryDate } from "./backend/history.ts";
 import type { FastifyRequest, FastifyReply } from "fastify";
 import { sessionPrincipal, actorOf } from "@aihot/backend/admin/auth";
 import { audit } from "@aihot/backend/audit";
@@ -29,6 +30,13 @@ export const rankingsServer = defineServerModule({
   },
   http(app) {
     app.get("/api/site/rankings", async (_req, reply) => { reply.header("Cache-Control", "public, max-age=60"); return { boards: await loadRankings() }; });
+    app.get("/api/site/rankings/history", async (req, reply) => {
+      const q = req.query as Record<string, unknown>;
+      if (typeof q.date !== "string" || !validHistoryDate(q.date) || (q.source !== undefined && typeof q.source !== "string") || (q.board !== undefined && typeof q.board !== "string") || (q.page !== undefined && (typeof q.page !== "string" || !/^[1-9]\d{0,5}$/.test(q.page)))) return reply.code(400).send({ error: "invalid history parameters" });
+      if ((typeof q.source === "string" && q.source.length > 120) || (typeof q.board === "string" && q.board.length > 200)) return reply.code(400).send({ error: "invalid history parameters" });
+      reply.header("Cache-Control", "public, max-age=60");
+      return loadRadarHistory(q.date, q.source || null, q.board || null, Number(q.page) || 1);
+    });
     const authorized = (header: string | undefined) => {
       const expected = credential("auth", "INGEST_TOKEN") ?? "";
       const given = /^Bearer\s+(.+)$/i.exec(header ?? "")?.[1]?.trim() ?? "";
