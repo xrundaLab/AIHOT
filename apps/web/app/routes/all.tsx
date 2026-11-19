@@ -90,13 +90,6 @@ export default function AllPage() {
     else sp.delete("tab");
     return `/all?${sp}`;
   };
-  const collectionHref = (radar: boolean) => {
-    const sp = new URLSearchParams(params);
-    sp.delete("page");
-    if (radar) sp.set("collection", "radar"); else sp.delete("collection");
-    const query = sp.toString();
-    return query ? `/all?${query}` : "/all";
-  };
   const contentTabHref = (evergreen: boolean) => {
     const sp = new URLSearchParams(params);
     sp.delete("page");
@@ -145,8 +138,6 @@ export default function AllPage() {
           { key: "evergreen", label: "常青内容", to: contentTabHref(true) },
         ]}
       />
-
-      {webModules().some(m => m.name === "rankings") && <div className="mb-4 flex items-center gap-3"><span className="text-[13px] text-ink-4">来源</span><PillTabs size="xs" layoutId="all-collection" label="雷达筛选" active={f.collection === "radar" ? "radar" : "all"} items={[{ key: "all", label: "全部来源", to: collectionHref(false) }, { key: "radar", label: "热文雷达", to: collectionHref(true) }]} /></div>}
 
       {/* Desktop, as on 精选: the title, then one filter row with the search field aligned on the right. */}
       <div className="hidden lg:block">

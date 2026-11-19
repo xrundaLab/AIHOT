@@ -11,22 +11,44 @@ before(async () => {
     if (url.pathname === "/api/admin/radar") return { source: { id: "radar-discovery", participation_mode: "isolated", tier: "T2", updated_at: at, enabled: true }, counts: [{ state: "external", count: 1 }], tasks: [{ id: "1", title: "需补采文章", url: "https://example.org/test", origin: "来源", state: "external", error: "抓取失败", article_id: "radar-article", processing_state: "skipped", visibility: null }] };
     if (url.pathname !== "/api/site/pool") return;
     const collection = url.searchParams.get("collection");
-    return { filters: { channel: "all", category: url.searchParams.get("category"), tag: null, q: url.searchParams.get("q"), tab: "time", sort: url.searchParams.get("sort") === "published" ? "published" : "collected", collection },
+    return { filters: { channel: "all", category: url.searchParams.get("category"), tag: url.searchParams.get("tag"), q: url.searchParams.get("q"), tab: "time", sort: url.searchParams.get("sort") === "published" ? "published" : "collected", collection },
       items: [feedItem({ id: "radar-article", title: "雷达文章", badge: "热文雷达", discoveredAt: at, publishedAt: at })], page: 1, pageCount: 1, total: 1, todayCount: 1, freshness: at };
   }));
   browser = await chromium.launch({ channel: "chromium" });
 });
 after(async () => { await browser?.close(); await web?.stop(); });
-for (const width of [393, 1200]) test(`radar filter keeps sorting and marks articles at ${width}px`, async () => {
+for (const width of [393, 1200]) test(`radar is a peer filter and preserves sorting at ${width}px`, async () => {
   const page = await browser.newPage({ viewport: { width, height: 850 } });
   try {
-    await visit(page, `${web.origin}/all?sort=published`);
-    await page.getByRole("navigation", { name: "雷达筛选" }).getByRole("link", { name: "热文雷达" }).click();
+    await visit(page, `${web.origin}/all?sort=published&tag=source%3Awechat-share`);
+    if (width < 961) {
+      await page.getByRole("button", { name: /筛选/ }).click();
+      const sheet = page.getByRole("dialog", { name: "筛选" });
+      await expect(sheet.getByRole("link", { name: "我 AI 我家" })).toBeVisible();
+      await sheet.getByRole("link", { name: "热文雷达" }).click();
+    } else {
+      const filters = page.getByRole("navigation", { name: "筛选" });
+      const names = await filters.getByRole("link").allTextContents();
+      expect(names.indexOf("热文雷达")).toBe(names.indexOf("我 AI 我家") + 1);
+      await filters.getByRole("link", { name: "热文雷达" }).click();
+    }
     await expect(page).toHaveURL(/collection=radar/);
     await expect(page).toHaveURL(/sort=published/);
+    await expect(page).not.toHaveURL(/wechat-share/);
     await expect(page.locator('article[data-item-id="radar-article"]').getByText("热文雷达")).toBeVisible();
     await page.reload();
-    await expect(page.getByRole("navigation", { name: "雷达筛选" }).getByRole("link", { name: "热文雷达" })).toHaveAttribute("aria-current", "page");
+    if (width < 961) {
+      await expect(page.getByRole("link", { name: "取消筛选：热文雷达" })).toBeVisible();
+      await page.getByRole("button", { name: /筛选/ }).click();
+      await page.getByRole("dialog", { name: "筛选" }).getByRole("link", { name: "政策" }).click();
+    } else {
+      const filters = page.getByRole("navigation", { name: "筛选" });
+      await expect(filters.getByRole("link", { name: "热文雷达" })).toHaveAttribute("aria-current", "page");
+      await filters.getByRole("link", { name: "政策" }).click();
+    }
+    await expect(page).toHaveURL(/category=policy/);
+    await expect(page).not.toHaveURL(/collection=radar/);
+    await expect(page).toHaveURL(/sort=published/);
   } finally { await page.close(); }
 });
 
