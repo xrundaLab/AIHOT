@@ -16,7 +16,7 @@ const TOKEN = /\{\{(>\s*)?([A-Za-z][\w.-]*)\s*\}\}/g;
 
 const files = new Map<string, string>();
 
-function raw(name: string): string {
+export function rawPrompt(name: string): string {
   let text = files.get(name);
   if (text === undefined) {
     text = readFileSync(path.join(DIR, `${name}.md`), "utf8");
@@ -40,7 +40,7 @@ function expandText(text: string, seen: string[]): { text: string; used: string[
 /** The file with its includes expanded, and the names of every file it read. */
 function expand(name: string, seen: string[] = []): { text: string; used: string[] } {
   if (seen.includes(name)) throw new Error(`prompt include cycle: ${[...seen, name].join(" → ")}`);
-  const inner = expandText(raw(name), [...seen, name]);
+  const inner = expandText(rawPrompt(name), [...seen, name]);
   return { text: inner.text, used: [name, ...inner.used] };
 }
 
@@ -67,6 +67,6 @@ export function promptFromText(label: string, text: string, values: Record<strin
 export function promptVersion(...names: string[]): string {
   const used = [...new Set(names.flatMap((n) => expand(n).used))].sort();
   const hash = createHash("sha256");
-  for (const n of used) hash.update(`${n}\n${raw(n)}\n`);
+  for (const n of used) hash.update(`${n}\n${rawPrompt(n)}\n`);
   return `${names.join("+")}@${hash.digest("hex").slice(0, 10)}`;
 }

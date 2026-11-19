@@ -1,3 +1,4 @@
+import { dailyPrompt, publishDailyPrompt } from "@aihot/backend/reports/daily-prompt";
 import { dailyRegeneration, requestDailyRegeneration } from "@aihot/backend/reports/regenerate";
 // /api/admin/*: queries are GET, creation POST, edits PATCH, business commands POST.
 // Every route goes through adminHandler (session + CSRF); manual changes are audited in the modules.
@@ -52,6 +53,11 @@ function decodeImage(dataUrl: unknown): Buffer {
 }
 
 export function registerAdmin(app: FastifyInstance) {
+  app.get("/api/admin/prompts/daily-review", adminHandler(async () => dailyPrompt()));
+  app.post("/api/admin/prompts/daily-review", adminHandler(async (req, _reply, admin) => {
+    const { text, expected } = body(req);
+    return publishDailyPrompt(text, expected, actorOf(admin));
+  }));
   // Sources
   app.get("/api/admin/reports/daily/:date/regeneration", adminHandler(async (req) => ({ run: await dailyRegeneration(param(req, "date")) })));
   app.post("/api/admin/reports/daily/:date/regenerate", adminHandler(async (req, _reply, admin) => ({

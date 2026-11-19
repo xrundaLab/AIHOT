@@ -1,7 +1,7 @@
 // Suitability is a daily-only editorial decision, paid and receipted like the other model steps.
 import { z } from "zod";
 import { sql } from "../db.ts";
-import { promptText, promptVersion } from "../editorial/prompts.ts";
+import { dailyPromptForRun } from "./daily-prompt.ts";
 import { modelFor } from "../editorial/models.ts";
 import { chatJson } from "../providers/llm.ts";
 import { shutdownSignal } from "../jobs/queue.ts";
@@ -90,7 +90,7 @@ export async function reviewRankedDaily(entries: EditionEntry[], batch: ReviewBa
 export async function reviewDaily(date: string, entries: EditionEntry[], attemptTag?: string) {
   const model = await modelFor("report");
   const receiptIds: number[] = [];
-  const version = promptVersion("daily-review");
+  const { system, version } = await dailyPromptForRun();
   const result = await reviewRankedDaily(entries, async (events, full) => {
     const articles = [...new Map(events.flatMap(e => e.reports.map(report => [report.id, { eventId: e.id, report }] as const))).values()];
     const decisions: DailyDecision[] = [];
@@ -107,7 +107,7 @@ export async function reviewDaily(date: string, entries: EditionEntry[], attempt
       for (const item of chunk) groups.set(item.eventId, [...(groups.get(item.eventId) ?? []), item.report]);
       const response = await chatJson({
         model, purpose: "report_daily_review", subject: `report:daily:${date}`, promptVersion: version,
-        system: promptText("daily-review"), user: JSON.stringify({ materialStatus: full ? "已确认正文（超长时仅提供前20000字符）" : "摘要，可能不完整",
+        system, user: JSON.stringify({ materialStatus: full ? "已确认正文（超长时仅提供前20000字符）" : "摘要，可能不完整",
           events: [...groups].map(([id, reports]) => ({ id, reports })) }),
         schema: Schema.superRefine((value, context) => {
           try { validateDecisions(chunk.map(item => item.report), value.decisions); }
