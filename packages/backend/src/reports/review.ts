@@ -4,6 +4,7 @@ import { sql } from "../db.ts";
 import { dailyPromptForRun } from "./daily-prompt.ts";
 import { modelFor } from "../editorial/models.ts";
 import { chatJson } from "../providers/llm.ts";
+import { ModelOutputError } from "../providers/receipts.ts";
 import { shutdownSignal } from "../jobs/queue.ts";
 import { arrangeDaily, MAIN_ENTRIES, FLASH_ENTRIES, type EditionEntry } from "./edition.ts";
 
@@ -15,6 +16,7 @@ const Schema = z.object({ decisions: z.array(Decision) });
 export type DailyDecision = z.infer<typeof Decision>;
 export interface ReviewMaterial { id: string; title: string; summary: string; body?: string }
 export type ReviewBatch = (events: Array<{ id: string; reports: ReviewMaterial[] }>, full: boolean) => Promise<DailyDecision[]>;
+const QUOTE_ERROR = "daily review: inclusion lacks a quote from this article's input";
 const normalize = (text: string) => text.replace(/\s+/gu, " ").trim();
 
 /** Reject partial or unsupported model responses instead of silently losing or admitting candidates. */
@@ -28,7 +30,7 @@ export function validateDecisions(materials: ReviewMaterial[], decisions: DailyD
     if (d.decision === "include") {
       const quote = normalize(d.quote);
       if (!quote || ![m.summary, m.body ?? ""].some(text => normalize(text).includes(quote))) {
-        throw new Error("daily review: inclusion lacks a quote from this article's input");
+        throw new Error(QUOTE_ERROR);
       }
     }
   }
@@ -41,6 +43,20 @@ export async function reviewRankedDaily(entries: EditionEntry[], batch: ReviewBa
   const accepted: EditionEntry[] = [];
   const decisions: DailyDecision[] = [];
   let reviewedEvents = 0;
+  const skippedBatches: Array<{ articleIds: string[]; stage: "summary" | "body"; receiptId: number | null }> = [];
+  const tryBatch: ReviewBatch = async (events, full) => {
+    try {
+      const decisions = await batch(events, full);
+      validateDecisions([...new Map(events.flatMap(event => event.reports).map(report => [report.id, report])).values()], decisions);
+      return decisions;
+    } catch (error) {
+      shutdownSignal.signal.throwIfAborted();
+      if (!(error instanceof ModelOutputError)) throw error;
+      skippedBatches.push({ articleIds: [...new Set(events.flatMap(event => event.reports.map(report => report.id)))],
+        stage: full ? "body" : "summary", receiptId: error.receiptId });
+      return [];
+    }
+  };
   for (let offset = 0; offset < entries.length; offset += 6) {
     shutdownSignal.signal.throwIfAborted();
     const candidates = entries.slice(offset, offset + 6);
@@ -50,19 +66,23 @@ export async function reviewRankedDaily(entries: EditionEntry[], batch: ReviewBa
     const material = events.flatMap(e => e.reports);
     // One article can be cited by multiple event candidates; the model still decides it once.
     const unique = [...new Map(material.map(m => [m.id, m])).values()];
-    const first = await batch(events, false);
+    const first = await tryBatch(events, false);
+    if (!first.length && unique.length) continue;
     validateDecisions(unique, first);
     const resolved = new Map(first.map(d => [d.id, d]));
     const pending = first.filter(d => d.decision === "needs_body");
     if (pending.length) {
       const reports = await Promise.all(pending.map(async d => {
         const body = await bodyOf(d.id);
-        if (!body) throw new Error(`daily review: confirmed body unavailable for ${d.id}`);
+        if (!body?.trim()) return null;
         return { ...unique.find(m => m.id === d.id)!, body: body.slice(0, 20000) };
       }));
-      const full = await batch(reports.map(m => ({ id: m.id, reports: [m] })), true);
-      validateDecisions(reports, full);
-      if (full.some(d => d.decision === "needs_body")) throw new Error("daily review: unresolved decision after body review");
+      // Keep missing bodies as needs_body in the audit and omit those articles from the issue.
+      const available = reports.filter(report => report !== null);
+      const full = available.length
+        ? await tryBatch(available.map(m => ({ id: m.id, reports: [m] })), true)
+        : [];
+      if (full.length) validateDecisions(available, full);
       for (const d of full) resolved.set(d.id, d);
     }
     decisions.push(...resolved.values());
@@ -84,7 +104,10 @@ export async function reviewRankedDaily(entries: EditionEntry[], batch: ReviewBa
     const issue = arrangeDaily(accepted);
     if (issue.main.length >= MAIN_ENTRIES && issue.flashes.length >= FLASH_ENTRIES) break;
   }
-  return { entries: accepted, decisions, reviewedEvents };
+  if (!accepted.length && (skippedBatches.length || decisions.some(d => d.decision === "needs_body"))) {
+    throw new Error("daily review: incomplete review with no publishable articles");
+  }
+  return { entries: accepted, decisions, reviewedEvents, skippedBatches };
 }
 
 export async function reviewDaily(date: string, entries: EditionEntry[], attemptTag?: string) {
@@ -105,14 +128,20 @@ export async function reviewDaily(date: string, entries: EditionEntry[], attempt
       }
       const groups = new Map<string, ReviewMaterial[]>();
       for (const item of chunk) groups.set(item.eventId, [...(groups.get(item.eventId) ?? []), item.report]);
-      const response = await chatJson({
+      const request = (quoteRetry: boolean) => chatJson({
         model, purpose: "report_daily_review", subject: `report:daily:${date}`, promptVersion: version,
         system, user: JSON.stringify({ materialStatus: full ? "已确认正文（超长时仅提供前20000字符）" : "摘要，可能不完整",
-          events: [...groups].map(([id, reports]) => ({ id, reports })) }),
+          events: [...groups].map(([id, reports]) => ({ id, reports })),
+          ...(quoteRetry ? { correction: "上一次引文未通过校验。每条 include 的 quote 请逐字复制该条 id 的 summary 或 body 中连续的一小段，保留标点，不拼接、不改写、不加省略号。无法从当前材料支持收录时，按规则返回 exclude 或 needs_body。请重新输出本批全部决定。" } : {}),
+        }),
         schema: Schema.superRefine((value, context) => {
           try { validateDecisions(chunk.map(item => item.report), value.decisions); }
           catch (error) { context.addIssue({ code: "custom", message: (error as Error).message }); }
         }), temperature: 0.2, maxTokens: 8192, attemptTag,
+      });
+      const response = await request(false).catch(error => {
+        if (!(error instanceof ModelOutputError) || !error.message.includes(QUOTE_ERROR)) throw error;
+        return request(true);
       });
       validateDecisions(chunk.map(item => item.report), response.data.decisions);
       receiptIds.push(response.receiptId);

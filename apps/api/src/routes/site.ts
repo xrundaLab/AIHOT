@@ -19,7 +19,7 @@ import { itemAvailability } from "@aihot/backend/publication/availability";
 import { listTopicSummaries, loadTopicPage, topicBrowseLinks } from "@aihot/backend/publication/topics";
 import { registerFeedback } from "./feedback.ts";
 import { loadHot, loadStoryDetail, resolveStory } from "@aihot/backend/publication/stories";
-import { listReports, loadReport, reportNavigation, loadReportNavigation, loadReportMonth, type ReportKind } from "@aihot/backend/publication/reports";
+import { dailyRevisions, listReports, loadReport, reportNavigation, loadReportNavigation, loadReportMonth, type ReportKind } from "@aihot/backend/publication/reports";
 import { looseQuery, QueryError, sendJsonWithEtag, sendProblem } from "../http/respond.ts";
 
 type Handler = (req: FastifyRequest, reply: FastifyReply) => Promise<unknown>;
@@ -59,6 +59,17 @@ export function parseFilters(q: Record<string, string>): FilterParams {
 }
 
 export function registerSite(app: FastifyInstance) {
+  app.get("/api/site/reports/daily/:date/history", async (req, reply) => {
+    reply.header("Cache-Control", "no-store");
+    return { items: await dailyRevisions((req.params as { date: string }).date) };
+  });
+  app.get("/api/site/reports/daily/:date/history/:revision", async (req, reply) => {
+    const { date, revision } = req.params as { date: string; revision: string };
+    const n = Number(revision);
+    const report = /^\d{1,9}$/.test(revision) && n > 0 ? await loadReport("daily", date, n) : null;
+    if (!report) return sendProblem(req, reply, { status: 404, code: "not_found", detail: "找不到该历史版本。" });
+    return reply.header("Cache-Control", "no-store").send(report);
+  });
   app.get("/api/site/reports/daily/:date/markdown", async (req, reply) => {
     const { date } = req.params as { date: string };
     const markdown = /^\d{4}-\d{2}-\d{2}$/.test(date) ? await dailyMarkdown(date) : null;

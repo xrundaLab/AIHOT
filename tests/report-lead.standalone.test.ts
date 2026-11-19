@@ -75,7 +75,14 @@ test("insufficient summaries fetch body; related reports do not inherit the even
   assert.deepEqual(bodies, ["article-1"]);
   assert.equal(result.entries.length, 1);
   assert.deepEqual(result.entries[0]!.entry.related, []);
-  await assert.rejects(reviewRankedDaily([e], async events => events.flatMap(e => e.reports.map(m => ({ ...include(m.id, ""), decision: "needs_body" as const }))), async () => null), /body unavailable/);
+  const missing = await reviewRankedDaily([e], async (events, full) => {
+    assert.equal(full, false, "no body review is sent when the body is missing");
+    return events.flatMap(event => event.reports.map((m, i) => i === 0
+      ? { ...include(m.id, ""), decision: "needs_body" as const }
+      : include(m.id, m.summary)));
+  }, async () => null);
+  assert.equal(missing.entries[0]?.entry.itemId, e.entry.related?.[0]?.itemId);
+  assert.equal(missing.decisions.find(d => d.id === e.entry.itemId)?.decision, "needs_body");
 });
 
 test("missing decisions and fabricated inclusion evidence fail rather than silently filter or admit", () => {
@@ -102,5 +109,16 @@ test("an included related development survives an excluded original representati
 test("a body review that still cannot decide is not an exclusion or a publishable result", async () => {
   await assert.rejects(reviewRankedDaily([reviewedEntry(0)], async events => events.flatMap(e => e.reports.map(m => ({
     ...include(m.id, ""), decision: "needs_body" as const,
-  }))), async () => "incomplete confirmed body"), /unresolved decision/);
+  }))), async () => "incomplete confirmed body"), /incomplete review with no publishable articles/);
+});
+
+test("an unusable model batch leaves later candidates eligible", async () => {
+  const { ModelOutputError } = await import("@aihot/backend/providers/receipts");
+  const entries = Array.from({ length: 7 }, (_, i) => reviewedEntry(i));
+  const result = await reviewRankedDaily(entries, async events => {
+    if (events.some(e => e.id === "article-0")) throw new ModelOutputError("invalid output", 12);
+    return events.flatMap(e => e.reports.map(m => include(m.id, m.summary)));
+  }, async () => null);
+  assert.deepEqual(result.entries.map(e => e.entry.itemId), ["article-6"]);
+  assert.equal(result.skippedBatches[0]?.receiptId, 12);
 });
