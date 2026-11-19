@@ -1,3 +1,4 @@
+import { dailyRegeneration, requestDailyRegeneration } from "@aihot/backend/reports/regenerate";
 // First-party site API (/api/site/*). Not public, not versioned, never called /api/v2.
 // Reads through the same public read layer as v1; no cookies are read or set.
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
@@ -57,6 +58,17 @@ export function parseFilters(q: Record<string, string>): FilterParams {
 }
 
 export function registerSite(app: FastifyInstance) {
+  app.get("/api/site/reports/daily/:date/regeneration", async (req, reply) => {
+    reply.header("Cache-Control", "no-store");
+    return { run: await dailyRegeneration((req.params as { date: string }).date) };
+  });
+  app.post("/api/site/reports/daily/:date/regenerate", async (req, reply) => {
+    reply.header("Cache-Control", "no-store");
+    // A non-simple header prevents cross-site forms from starting paid work; no cross-origin CORS grant.
+    if (req.headers["x-daily-regeneration"] !== "1" || req.headers["sec-fetch-site"] === "cross-site")
+      return sendProblem(req, reply, { status: 403, code: "forbidden", detail: "请从本站日报页面重新生成。" });
+    return { run: await requestDailyRegeneration((req.params as { date: string }).date, "public-reader", String(req.headers["idempotency-key"] ?? req.id)) };
+  });
   app.get("/api/site/meta", siteHandler(async (req, reply) => {
     return sendJsonWithEtag(req, reply, siteMeta(), { etagPrefix: "meta", cacheControl: "public, max-age=60, s-maxage=60" });
   }));

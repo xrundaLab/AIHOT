@@ -1,4 +1,4 @@
-// Administrator commands enqueue work; only a worker composes a daily and pays for its review.
+// Explicit reader commands enqueue work; only a worker composes a daily and pays for its review.
 import type { AdminDailyRegeneration } from "@aihot/contracts/admin";
 import { sql } from "../db.ts";
 import { audit } from "../audit.ts";
@@ -37,7 +37,7 @@ export async function requestDailyRegeneration(date: string, actor: string, requ
     const [pending] = await tx`SELECT id FROM pgboss.job WHERE name=${QUEUES.regenerateDaily}
       AND data->>'date'=${date} AND state IN ('created','retry','active') ORDER BY created_on DESC LIMIT 1`;
     if (!pending) {
-      const reason = "管理员手动重新生成";
+      const reason = actor === "public-reader" ? "读者手动重新生成" : "管理员手动重新生成";
       const id = await enqueue(QUEUES.regenerateDaily, { date, actor, reason, requestId }, { singletonKey: date }, tx);
       await audit(actor, "report.regenerate.request", `report:daily:${date}`, reason, null, { jobId: id }, { db: tx, requestId });
     }
