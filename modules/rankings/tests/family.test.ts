@@ -36,7 +36,17 @@ test("family rankings use publication time for the rolling window and score ties
     assert.equal(recent[0].heat, '90 分');
     assert.deepEqual((await loadFamilyRanking(72, now)).map(x => x.title), ['three-days', 'tie-new', 'tie-old', 'recent']);
     assert.equal((await loadFamilyRanking(168, now))[1].title, 'seven-days');
+    const rankingItems = [
+      { rank: 1, title: "匹配", url: "https://example.org/recent", heat: "", origin: "" },
+      { rank: 2, title: "已撤回", url: "https://example.org/withdrawn", heat: "", origin: "" },
+      { rank: 3, title: "未匹配", url: "https://example.org/missing", heat: "", origin: "" },
+    ];
+    await sql`INSERT INTO external_rankings (id,name,source,url,items) VALUES ('test:match','测试','测试','https://example.org',${sql.json(rankingItems)})`;
     const boards = await loadRankings(now);
+    const matched = boards.find(b => b.id === 'test:match')!.items;
+    assert.equal(matched[0].detailUrl, '/items/recent');
+    assert.equal(matched[1].detailUrl, undefined);
+    assert.equal(matched[2].detailUrl, undefined);
     assert.deepEqual(boards.slice(0, 4).map(b => b.name), ['2小时', '48小时', '3天', '7天']);
     assert.ok(boards.findIndex(b => b.source === '微小榜') < boards.findIndex(b => b.source === '豚榜'));
     for (let i = 0; i < 103; i++) await add(`bulk-${i}`, 1, 80);

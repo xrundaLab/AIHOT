@@ -26,6 +26,20 @@ export async function loadRankings(now = new Date()): Promise<Ranking[]> {
       ORDER BY CASE WHEN b.id='tunbang:all' THEN 0 ELSE 1 END,b.name`,
     ...[2, 48, 72, 168].map(hours => loadFamilyRanking(hours, now)),
   ]);
+  // Match only exact source URLs and only publicly listed articles. Ambiguous URLs
+  // deliberately remain external rather than sending readers to the wrong article.
+  const urls = [...new Set(rows.flatMap(board => board.items.map(item => item.url).filter((url): url is string => !!url && /^https?:\/\//.test(url))))];
+  if (urls.length) {
+    const matches = await sql<{ url: string; id: string }[]>`
+      SELECT p.url, min(p.article_id) AS id FROM publications p
+      WHERE p.url = ANY(${urls}::text[]) AND ${listedCondition(now)}
+      GROUP BY p.url HAVING count(*) = 1`;
+    const details = new Map(matches.map(row => [row.url, `/items/${encodeURIComponent(row.id)}`]));
+    for (const board of rows) for (const item of board.items) {
+      const detailUrl = item.url && details.get(item.url);
+      if (detailUrl) item.detailUrl = detailUrl;
+    }
+  }
   const family: Ranking[] = ["2小时", "48小时", "3天", "7天"].map((name, index) => ({ id: `family:${[2,48,72,168][index]}`, name, source: "家友榜", url: "/all", items: familyItems[index], sourceUpdated: null, fetchedAt: now.toISOString(), failed: false }));
   const known = rows.some(b => b.id === total.id) ? rows : [{ ...total, items: [], sourceUpdated: null, fetchedAt: null, failed: false }, ...rows];
   const external = [...known, ...[...otherBoards, ...topBoards].filter(board => !known.some(b => b.id === board.id)).map(board => ({ ...board, items: [], sourceUpdated: null, fetchedAt: null, failed: false }))];
