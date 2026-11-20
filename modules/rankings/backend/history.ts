@@ -1,7 +1,7 @@
 import { beijingDate, beijingMidnight } from "@aihot/contracts/time";
 import { sql } from "@aihot/backend/db";
 import { identityKeyForUrl } from "@aihot/backend/lib/url";
-import { listedCondition } from "@aihot/backend/publication/scope";
+import { readableDetailCondition } from "@aihot/backend/publication/scope";
 import type { Entry } from "./tunbang.ts";
 import type { RankingJudgement } from "./screen.ts";
 
@@ -39,11 +39,15 @@ export async function loadRadarHistory(date: string, source: string | null, boar
     .sort((a,b) => a.source.localeCompare(b.source, "zh-CN") || a.name.localeCompare(b.name, "zh-CN"));
   const selected = snapshots.filter(s => (!source || s.source === source) && (!board || s.board_id === board));
   const ids = selected.map(s => s.id);
-  const associations = ids.length ? await sql<{ snapshot_id: number; rank: number; article_id: string | null }[]>`
-    SELECT o.snapshot_id,o.rank,CASE WHEN ${listedCondition(now)} THEN p.article_id ELSE NULL END AS article_id
+  const associations = ids.length ? await sql<{ snapshot_id: number; rank: number; article_id: string | null; hidden: boolean }[]>`
+    SELECT o.snapshot_id,o.rank,CASE WHEN ${readableDetailCondition(now)} THEN p.article_id ELSE NULL END AS article_id,
+      coalesce(e.visibility='withdrawn' OR (p.visibility='withdrawn' AND s.participation_mode<>'isolated'),false) AS hidden
     FROM radar_body_occurrences o JOIN radar_body_tasks t ON t.id=o.task_id LEFT JOIN publications p ON p.article_id=t.article_id
+    LEFT JOIN articles a ON a.id=t.article_id LEFT JOIN sources s ON s.id=a.source_id LEFT JOIN editorial_overrides e ON e.article_id=a.id
     WHERE o.snapshot_id=ANY(${ids}::bigint[])` : [];
   const matched = new Map(associations.filter(x => x.article_id).map(x => [`${x.snapshot_id}:${x.rank}`, x.article_id!]));
+  const hiddenOccurrences = new Set(associations.filter(x => x.hidden).map(x => `${x.snapshot_id}:${x.rank}`));
+  const hiddenGroups = new Set<string>();
   const groups = new Map<string, HistoryItem>();
   const originalUrls = new Map<HistoryItem, Set<string>>();
   for (const snapshot of selected) {
@@ -53,6 +57,7 @@ export async function loadRadarHistory(date: string, source: string | null, boar
       if (!judgment || judgment.level !== "A" || judgment.title !== item.title) continue;
       const safeUrl = item.url && /^https?:\/\//i.test(item.url) && identityKeyForUrl(item.url) ? item.url : null;
       const key = (safeUrl && identityKeyForUrl(safeUrl)) || `snapshot:${snapshot.id}:${item.rank}`;
+      if (hiddenOccurrences.has(`${snapshot.id}:${item.rank}`)) hiddenGroups.add(key);
       const at = snapshot.fetched_at.toISOString();
       let group = groups.get(key);
       if (!group) {
@@ -72,6 +77,7 @@ export async function loadRadarHistory(date: string, source: string | null, boar
   }
   // An explicitly withdrawn article must not be revived by an old public snapshot. The
   // isolated radar source is not a withdrawal decision: it is simply unpublished material.
+  for (const key of hiddenGroups) groups.delete(key);
   const identities = [...groups.keys()].filter(key => !key.startsWith("snapshot:"));
   if (identities.length) {
     const states = await sql<{ identity_key: string; visibility: string | null; source_mode: string; override_visibility: string | null }[]>`
@@ -85,7 +91,7 @@ export async function loadRadarHistory(date: string, source: string | null, boar
   const urls = [...new Set(all.filter(x => !x.detailUrl).flatMap(x => [...originalUrls.get(x)!]))];
   if (urls.length) {
     const rows = await sql<{ url: string; id: string; count: number }[]>`SELECT p.url,min(p.article_id) AS id,count(*)::int AS count FROM publications p
-      WHERE p.url=ANY(${urls}::text[]) AND ${listedCondition(now)} GROUP BY p.url`;
+      WHERE p.url=ANY(${urls}::text[]) AND ${readableDetailCondition(now)} GROUP BY p.url`;
     const byUrl = new Map(rows.map(r => [r.url, r.count === 1 ? r.id : null]));
     for (const item of all) if (!item.detailUrl) {
       const candidates = [...originalUrls.get(item)!].filter(url => byUrl.has(url)).map(url => byUrl.get(url));

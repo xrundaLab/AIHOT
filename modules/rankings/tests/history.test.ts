@@ -13,7 +13,7 @@ async function snapshot(board: string, source: string, when: string, items: Retu
 test("history keeps each day's saved A judgments, merges a URL and respects Beijing midnight", async () => {
   await sql`INSERT INTO sources(id,name,kind,participation_mode) VALUES ('history-source','来源','rss','editorial')`;
   await sql`INSERT INTO articles(id,source_id,identity_key,url,title,discovered_at,timeline_at) VALUES ('history-a','history-source','url:https://example.org/a','https://example.org/a','文章',now(),now())`;
-  await sql`INSERT INTO publications(article_id,source_id,title,url,channel,visibility,eligible,discovered_at,timeline_at,sort_at) VALUES ('history-a','history-source','文章','https://example.org/a','news','public',true,now(),now(),now())`;
+  await sql`INSERT INTO publications(article_id,source_id,title,url,channel,visibility,eligible,discovered_at,timeline_at,sort_at) VALUES ('history-a','history-source','文章','https://example.org/a','news','public',false,now(),now(),now())`;
   await snapshot('board-1','豚榜','2026-11-18T16:01:00Z',[item(1,'旧标题','https://example.org/a'),item(2,'无链接',null),item(3,'B级','https://example.org/b')],[judgment(1,'旧标题','A','旧理由'),judgment(2,'无链接'),judgment(3,'B级','B')]);
   await snapshot('board-2','微小榜','2026-11-19T15:59:00Z',[item(7,'新标题','https://example.org/a?utm_source=feed'),item(8,'不匹配','https://example.org/c')],[judgment(7,'新标题','A','新理由'),judgment(8,'错误标题')]);
   await snapshot('next','豚榜','2026-11-19T16:00:00Z',[item(1,'次日','https://example.org/next')],[judgment(1,'次日')]);
@@ -123,4 +123,19 @@ test("daily radar candidates use in-window completed A snapshots and public arti
   assert.deepEqual(await radarDailyCandidates(legacyFrom,legacyTo),[],'an ambiguous legacy URL must not guess an article');
   await sql`UPDATE sources SET participation_mode='isolated' WHERE id='daily-radar-source'`;
   assert.deepEqual(await radarDailyCandidates(from,to), []);
+});
+
+test('history uses a readable associated detail even before it enters the pool', async () => {
+  await sql`INSERT INTO articles(id,source_id,identity_key,url,title,discovered_at,timeline_at) VALUES ('history-associated','history-source','associated','https://article.example/a','待处理',now(),now())`;
+  await sql`INSERT INTO publications(article_id,source_id,title,url,channel,visibility,eligible,discovered_at,timeline_at,sort_at)
+    VALUES ('history-associated','history-source','待处理','https://article.example/a','news','public',false,now(),now(),now())`;
+  const items = [item(1,'待处理','https://ranking.example/redirect')];
+  const [snap] = await sql<{ id: number }[]>`INSERT INTO external_ranking_snapshots(board_id,name,source,url,items,results,status,fetched_at,rule_version,rule_prompt)
+    VALUES ('history-linked','链接榜','测试','https://example.org',${sql.json(items)},${sql.json([judgment(1,'待处理')])},'complete','2026-11-22T00:00:00Z','v1','test') RETURNING id`;
+  const [task] = await sql<{ id: number }[]>`INSERT INTO radar_body_tasks(identity_key,article_id,title,url,state)
+    VALUES ('history-associated','history-associated','待处理','https://ranking.example/redirect','external') RETURNING id`;
+  await sql`INSERT INTO radar_body_occurrences(snapshot_id,rank,task_id) VALUES (${snap!.id},1,${task!.id})`;
+  assert.equal((await loadRadarHistory('2026-11-22',null,null,1)).items[0]!.detailUrl, '/items/history-associated');
+  await sql`UPDATE publications SET visibility='withdrawn' WHERE article_id='history-associated'`;
+  assert.equal((await loadRadarHistory('2026-11-22',null,null,1)).items.length, 0, 'a withdrawn associated article is not revived by its ranking redirect URL');
 });

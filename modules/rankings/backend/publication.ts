@@ -1,5 +1,5 @@
 import { sql } from "@aihot/backend/db";
-import { listedCondition } from "@aihot/backend/publication/scope";
+import { listedCondition, readableDetailCondition } from "@aihot/backend/publication/scope";
 import { publicSourceName } from "@aihot/backend/publication/rules";
 import { otherBoards, total, type Entry } from "./tunbang.ts";
 import { topBoards } from "./tophub.ts";
@@ -54,7 +54,7 @@ export async function loadRankings(now = new Date()): Promise<Ranking[]> {
     ...[2, 48, 72, 168].map(hours => loadFamilyRanking(hours, now)),
   ]);
   const taskStates = await sql<{ board_id: string; rank: number; state: Entry["bodyState"]; article_id: string | null }[]>`
-    SELECT b.id AS board_id,o.rank,t.state,CASE WHEN ${listedCondition(now)} THEN p.article_id ELSE NULL END AS article_id FROM external_rankings b
+    SELECT b.id AS board_id,o.rank,t.state,CASE WHEN ${readableDetailCondition(now)} THEN p.article_id ELSE NULL END AS article_id FROM external_rankings b
     JOIN external_ranking_snapshots s ON s.board_id=b.id AND s.fetched_at=b.fetched_at
     JOIN radar_body_occurrences o ON o.snapshot_id=s.id JOIN radar_body_tasks t ON t.id=o.task_id
     LEFT JOIN publications p ON p.article_id=t.article_id`;
@@ -66,13 +66,13 @@ export async function loadRankings(now = new Date()): Promise<Ranking[]> {
       if (state.article_id) item.detailUrl = `/items/${encodeURIComponent(state.article_id)}`;
     }
   }
-  // Match only exact source URLs and only publicly listed articles. Ambiguous URLs
+  // Match only exact source URLs and only publicly readable article details. Ambiguous URLs
   // deliberately remain external rather than sending readers to the wrong article.
   const urls = [...new Set(rows.flatMap(board => board.items.map(item => item.url).filter((url): url is string => !!url && /^https?:\/\//.test(url))))];
   if (urls.length) {
     const matches = await sql<{ url: string; id: string }[]>`
       SELECT p.url, min(p.article_id) AS id FROM publications p
-      WHERE p.url = ANY(${urls}::text[]) AND ${listedCondition(now)}
+      WHERE p.url = ANY(${urls}::text[]) AND ${readableDetailCondition(now)}
       GROUP BY p.url HAVING count(*) = 1`;
     const details = new Map(matches.map(row => [row.url, `/items/${encodeURIComponent(row.id)}`]));
     for (const board of rows) for (const item of board.items) {

@@ -24,6 +24,11 @@ export function listedCondition(now: Date) {
   return sql`p.visibility = 'public' AND p.eligible AND ${releasedCondition(now)}`;
 }
 
+/** A readable editorial detail may be absent from the public pool (for example while awaiting a summary). */
+export function readableDetailCondition(now: Date) {
+  return sql`p.visibility <> 'withdrawn' AND ${releasedCondition(now)} AND EXISTS (SELECT 1 FROM sources detail_source WHERE detail_source.id=p.source_id AND detail_source.participation_mode='editorial')`;
+}
+
 /** Story reports include older editorial material outside the pool, but never withdrawn or not yet released content. */
 export function storyReportCondition(now: Date) {
   return sql`p.visibility = 'public' AND s.participation_mode = 'editorial' AND ${releasedCondition(now)}`;

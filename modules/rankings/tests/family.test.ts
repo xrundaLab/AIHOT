@@ -23,6 +23,10 @@ test("family rankings use publication time for the rolling window and score ties
     await add('future', -1, 100);
     await add('withdrawn', 1, 100, 'withdrawn');
     await add('ineligible', 1, 100, 'public', false);
+    await add('summary-only', 1, 100, 'summary-only', false);
+    await add('isolated', 1, 100, 'public', false);
+    await sql`INSERT INTO sources (id,name,kind,tier,participation_mode) VALUES ('family-isolated','隔离来源','rss','T2','isolated')`;
+    await sql`UPDATE publications SET source_id='family-isolated' WHERE article_id='isolated'`;
     await add('unscored', 1, null);
     await add('old-publication', 1, 100, 'public', true, false, null, 169);
     await add('missing-publication', 1, 100, 'public', true, false, null, null);
@@ -40,13 +44,25 @@ test("family rankings use publication time for the rolling window and score ties
       { rank: 1, title: "匹配", url: "https://example.org/recent", heat: "", origin: "" },
       { rank: 2, title: "已撤回", url: "https://example.org/withdrawn", heat: "", origin: "" },
       { rank: 3, title: "未匹配", url: "https://example.org/missing", heat: "", origin: "" },
+      { rank: 4, title: "可读但未入动态", url: "https://ranking.example.org/redirect-ineligible", heat: "", origin: "" },
+      { rank: 5, title: "仅摘要", url: "https://example.org/summary-only", heat: "", origin: "" },
+      { rank: 6, title: "尚未发布", url: "https://example.org/not-released", heat: "", origin: "" },
+      { rank: 7, title: "隔离信源", url: "https://example.org/isolated", heat: "", origin: "" },
     ];
-    await sql`INSERT INTO external_rankings (id,name,source,url,items) VALUES ('test:match','测试','测试','https://example.org',${sql.json(rankingItems)})`;
+    await sql`INSERT INTO external_rankings (id,name,source,url,items,fetched_at) VALUES ('test:match','测试','测试','https://example.org',${sql.json(rankingItems)},${now})`;
+    const [snapshot] = await sql<{ id: number }[]>`INSERT INTO external_ranking_snapshots(board_id,name,source,url,items,fetched_at,rule_version,rule_prompt)
+      VALUES ('test:match','测试','测试','https://example.org',${sql.json(rankingItems)},${now},'v1','test') RETURNING id`;
+    const [task] = await sql<{ id: number }[]>`INSERT INTO radar_body_tasks(identity_key,article_id,title,url,state) VALUES ('rank-ineligible','ineligible','可读但未入动态','https://ranking.example.org/redirect-ineligible','external') RETURNING id`;
+    await sql`INSERT INTO radar_body_occurrences(snapshot_id,rank,task_id) VALUES (${snapshot!.id},4,${task!.id})`;
     const boards = await loadRankings(now);
     const matched = boards.find(b => b.id === 'test:match')!.items;
     assert.equal(matched[0].detailUrl, '/items/recent');
     assert.equal(matched[1].detailUrl, undefined);
     assert.equal(matched[2].detailUrl, undefined);
+    assert.equal(matched[3].detailUrl, '/items/ineligible');
+    assert.equal(matched[4].detailUrl, '/items/summary-only');
+    assert.equal(matched[5].detailUrl, undefined);
+    assert.equal(matched[6].detailUrl, undefined);
     assert.deepEqual(boards.slice(0, 4).map(b => b.name), ['2小时', '48小时', '3天', '7天']);
     assert.ok(boards.findIndex(b => b.source === '微小榜') < boards.findIndex(b => b.source === '豚榜'));
     for (let i = 0; i < 103; i++) await add(`bulk-${i}`, 1, 80);
