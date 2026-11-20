@@ -6,12 +6,13 @@ import { config } from "@aihot/backend/config";
 import { InvalidCursorError } from "@aihot/backend/lib/cursor";
 import { SearchBusyError } from "@aihot/backend/publication/pool";
 import { selectedChanges, selectedSnapshot, SnapshotRequiredError, v1Items } from "@aihot/backend/publication/v1";
+import { dailyMarkdown } from "@aihot/backend/publication/daily-markdown";
 import { v1ItemDetail } from "@aihot/backend/publication/detail";
 import { resolveStory, v1HotTopics, v1Story } from "@aihot/backend/publication/stories";
 import { isPeriodKey, v1Dailies, v1Daily, v1Period, v1Periods } from "@aihot/backend/publication/reports";
 import { isValidDate } from "@aihot/contracts/time";
 import { requestNotice } from "@aihot/backend/modules";
-import { applyPublicHeaders, QueryError, sendJsonWithNotice, sendJsonWithEtag, sendProblem, strictQuery } from "../http/respond.ts";
+import { applyPublicHeaders, QueryError, sendJsonWithNotice, sendJsonWithEtag, sendTextWithEtag, sendProblem, strictQuery } from "../http/respond.ts";
 
 type Handler = (req: FastifyRequest, reply: FastifyReply) => Promise<unknown>;
 
@@ -24,6 +25,7 @@ export const V1_OPERATIONS = {
   storyByPublicId: op([], "public, max-age=60, s-maxage=60, must-revalidate"),
   dailies: op(["limit"], "public, max-age=60, s-maxage=60, must-revalidate"),
   latestDaily: op([], "public, max-age=60, s-maxage=60, must-revalidate"),
+  dailyMarkdownByDate: op([], "public, max-age=60, s-maxage=60, must-revalidate"),
   dailyByDate: op([], "public, max-age=300, s-maxage=300, must-revalidate"),
   weeklies: op(["limit"], "public, max-age=300, s-maxage=300, must-revalidate"),
   latestWeekly: op([], "public, max-age=300, s-maxage=300, must-revalidate"),
@@ -153,6 +155,18 @@ export function registerV1(app: FastifyInstance) {
     const body = await v1Daily(date);
     if (!body) return sendProblem(req, reply, { status: 404, code: "not_found", detail: `No daily report exists for ${date}.`, cacheControl: "public, max-age=60" });
     return sendV1(req, reply, body, { etagPrefix: "v1-daily", cacheControl: V1_OPERATIONS.dailyByDate.cacheControl });
+  }));
+
+  app.get("/api/v1/dailies/:date/markdown", publicHandler(async (req, reply) => {
+    const operation = V1_OPERATIONS.dailyMarkdownByDate;
+    strictQuery(req, operation.queryKeys);
+    const { date } = req.params as { date: string };
+    if (!isValidDate(date)) throw new QueryError("date must be a real YYYY-MM-DD calendar date.");
+    const markdown = await dailyMarkdown(date);
+    if (markdown === null) return sendProblem(req, reply, { status: 404, code: "not_found", detail: `No daily report exists for ${date}.` });
+    return sendTextWithEtag(req, reply, markdown, {
+      etagPrefix: "v1-daily-markdown", cacheControl: operation.cacheControl, contentType: "text/markdown; charset=utf-8",
+    });
   }));
 
   // Weeklies and monthlies: an index, the latest issue and one issue by ISO week or month.

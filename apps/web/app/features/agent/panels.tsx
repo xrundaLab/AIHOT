@@ -212,6 +212,7 @@ export function ApiPanel(props: AgentPanelProps) {
             { group: "日报" },
             [<Mono>/api/v1/dailies/latest</Mono>, "最新一期日报", `${EDITION_WHEN.daily} 后一次`],
             [<Mono>{"/api/v1/dailies/{date}"}</Mono>, "指定日期日报；撤稿会移除引用", "缓存过期后使用前验证 ETag"],
+            [<Mono>{"/api/v1/dailies/{date}/markdown"}</Mono>, "指定日期日报 Markdown，含原文链接、精选状态、评分、标签和主题", "按需获取，缓存过期后验证 ETag"],
             [<Mono>/api/v1/dailies</Mono>, "日报日期索引", "每天一次"],
             { group: "周报与月报" },
             [<Mono>/api/v1/weeklies/latest</Mono>, "最新一期周报：头条、总述和一周重点，按栏目分好", `${EDITION_WHEN.weekly} 后一次`],
