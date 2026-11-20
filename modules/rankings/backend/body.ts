@@ -1,13 +1,50 @@
 import { createHash, randomUUID } from "node:crypto";
 import { sql, type Db } from "@aihot/backend/db";
 import { identityKeyForUrl } from "@aihot/backend/lib/url";
-import { contentHash, reviseMaterial, upsertMaterial } from "@aihot/backend/content/materials";
+import { contentHash, fillPublicationTime, reviseMaterial, upsertMaterial } from "@aihot/backend/content/materials";
 import { withPushedImages } from "@aihot/backend/content/presentation";
-import { textToHtml } from "@aihot/backend/content/sanitize";
+import { sanitizeBody, textToHtml } from "@aihot/backend/content/sanitize";
 import { extractArticleBody, pageFetchable } from "@aihot/backend/content/extract";
+import { stripTags } from "@aihot/backend/lib/text";
+import { mpArticle, mpProviderConfigured } from "@aihot/backend/providers/wechat";
+import { completeReceipt } from "@aihot/backend/providers/receipts";
+import { readPublicationDate } from "@aihot/backend/sources/dates";
 import { queueProcessing } from "@aihot/backend/jobs/content";
 import type { Entry } from "./tunbang.ts";
 import type { RankingJudgement } from "./screen.ts";
+
+function wechatArticleUrl(value: string): string | null {
+  try {
+    const url = new URL(value);
+    if (!['http:', 'https:'].includes(url.protocol) || url.hostname !== 'mp.weixin.qq.com' || url.port || url.username || url.password || !/^\/s(?:\/[^/]+)?\/?$/.test(url.pathname)) return null;
+    url.protocol = 'https:';
+    return url.toString();
+  } catch { return null; }
+}
+
+async function fetchWechatBody(task: { id: number; article_id: string; revision: number; url: string }, claim: string, url: string) {
+  const result = await mpArticle(url, { subject: 'radar-discovery', identity: identityKeyForUrl(url) ?? url });
+  const html = sanitizeBody(result.content, url);
+  const text = stripTags(html).trim();
+  await sql.begin(async tx => {
+    const [currentTask] = await tx<{ state: string; lease_token: string; valid: boolean }[]>`SELECT state,lease_token,lease_until>now() AS valid FROM radar_body_tasks WHERE id=${task.id} FOR UPDATE`;
+    if (!currentTask || currentTask.state !== 'running' || currentTask.lease_token !== claim || !currentTask.valid) return;
+    const [article] = await tx<{ revision: number; body_status: string; title: string; excerpt: string | null }[]>`SELECT revision,body_status,title,excerpt FROM articles WHERE id=${task.article_id} FOR UPDATE`;
+    if (!article || article.revision !== task.revision || article.body_status === 'ok') {
+      await tx`UPDATE radar_body_tasks SET state=${article?.body_status === 'ok' ? 'complete' : 'external'},error=${article?.body_status === 'ok' ? null : '文章已更新，请重新尝试'},lease_until=null,updated_at=now() WHERE id=${task.id}`;
+    } else if (!text) {
+      await tx`UPDATE radar_body_tasks SET state='external',error='公众号服务未返回正文',lease_until=null,updated_at=now() WHERE id=${task.id}`;
+    } else {
+      const date = readPublicationDate(result.pubtime, '+08:00');
+      await fillPublicationTime(tx, task.article_id, date.publishedAt, undefined, date.publicationTime);
+      const excerpt = article.excerpt ?? result.desc;
+      await reviseMaterial(tx, task.article_id, { set: sql`body_text=${text},body_html=${html},body_status='ok',author=coalesce(author,${result.author}),excerpt=${excerpt}`, hash: contentHash({ title: article.title, bodyText: text, excerpt }), title: article.title, bodyText: text });
+      await queueProcessing(task.article_id, { db: tx });
+      await tx`UPDATE radar_body_tasks SET state='complete',error=null,lease_until=null,updated_at=now() WHERE id=${task.id}`;
+    }
+    await completeReceipt(tx, result.receiptId);
+  });
+}
 
 /** Called in the same transaction as screening so a crash cannot lose work. */
 export async function recordRadarTasks(db: Db, snapshot: { id: number; fetched_at: Date; items: Entry[] }, results: RankingJudgement[]) {
@@ -47,16 +84,18 @@ export async function processRadarBodies() {
     FROM articles a WHERE t.article_id=a.id AND t.state IN ('pending','external') AND a.body_status='ok'`;
   for (let n = 0; n < 5; n++) {
     const claim = randomUUID();
-    const [task] = await sql<{ id: number; article_id: string; attempts: number; url: string; kind: string; body_status: string }[]>`
+    const [task] = await sql<{ id: number; article_id: string; attempts: number; url: string; kind: string; body_status: string; revision: number }[]>`
       WITH candidate AS (SELECT id FROM radar_body_tasks WHERE state='pending' OR (state='running' AND lease_until < now())
         ORDER BY updated_at,id FOR UPDATE SKIP LOCKED LIMIT 1),
       claimed AS (UPDATE radar_body_tasks t SET state='running',lease_token=${claim},lease_until=now()+interval '10 minutes',attempts=t.attempts+1,updated_at=now()
         FROM candidate c WHERE t.id=c.id RETURNING t.*)
-      SELECT c.id,c.article_id,c.attempts,a.url,s.kind,a.body_status FROM claimed c JOIN articles a ON a.id=c.article_id JOIN sources s ON s.id=a.source_id`;
+      SELECT c.id,c.article_id,c.attempts,a.url,s.kind,a.body_status,a.revision FROM claimed c JOIN articles a ON a.id=c.article_id JOIN sources s ON s.id=a.source_id`;
     if (!task) break;
     try {
       if (task.body_status === 'ok') {
         await sql`UPDATE radar_body_tasks SET state='complete',error=null,lease_until=null,updated_at=now() WHERE id=${task.id} AND state='running' AND lease_token=${claim}`;
+      } else if (wechatArticleUrl(task.url) && mpProviderConfigured()) {
+        await fetchWechatBody(task, claim, wechatArticleUrl(task.url)!);
       } else if (!pageFetchable(task.url, task.kind)) {
         await sql`UPDATE radar_body_tasks SET state='external',error='该来源不支持自动网页抓取',lease_until=null,updated_at=now() WHERE id=${task.id} AND state='running' AND lease_token=${claim}`;
       } else {
