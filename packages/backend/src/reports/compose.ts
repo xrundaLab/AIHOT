@@ -18,7 +18,7 @@ import { chatJson } from "../providers/llm.ts";
 import { completeReceipt } from "../providers/receipts.ts";
 import { shutdownSignal } from "../jobs/queue.ts";
 import { emit } from "../modules.ts";
-import { arrangeDaily, mergeDaily, candidates, dailyEdition, periodEntries, sectionOf, SECTION_ORDER, type Candidate, type EditionEntry } from "./edition.ts";
+import { arrangeDaily, dailyLogLinks, mergeDaily, candidates, dailyEdition, periodEntries, sectionOf, SECTION_ORDER, type Candidate, type EditionEntry } from "./edition.ts";
 
 export const REPORT_VERSION = promptVersion("report-period", "report-period-sections", "report-period-no-sections");
 
@@ -107,7 +107,10 @@ async function composeDailyLocked(date: string, reason?: string, attemptTag?: st
   const edition = await dailyEdition(date, start, end);
   // Nothing judged in the window is a failure upstream, not a quiet day: the run fails and is caught up later.
   if (edition.entries.length === 0 && edition.stats.judgedReports === 0) throw new Error(`daily ${date}: nothing judged in its window`);
-  const review = await reviewDaily(date, mergeDaily(edition.entries), attemptTag);
+  const events = mergeDaily(edition.entries);
+  const review = await reviewDaily(date, events, attemptTag);
+  const links = (entries: EditionEntry[]) => dailyLogLinks(entries.flatMap(({ entry }) =>
+    [entry, ...(entry.related ?? [])].map(article => ({ title: article.title, url: article.sourceUrl }))));
   const issue = arrangeDaily(review.entries);
   const [lead, ...rest] = issue.main;
   const content = {
@@ -125,6 +128,12 @@ async function composeDailyLocked(date: string, reason?: string, attemptTag?: st
     windowStart: start.toISOString(),
     windowEnd: end.toISOString(),
     generator: { version: review.version, model: review.model, reviewedEvents: review.reviewedEvents, ...edition.stats, ...issue.stats },
+    dailyLog: {
+      initial: edition.initial,
+      supplements: edition.supplements,
+      events: links(events),
+      selected: links([...issue.main, ...issue.flashes]),
+    },
     suitability: review.decisions,
     skippedReviewBatches: review.skippedBatches,
   };

@@ -331,7 +331,13 @@ interface Fact { key: string; rows: ReportRow[]; selected: boolean; origins: str
  * The daily's events for the window [start, end), most important first, before the editors' pass:
  * selected reports and missed facts, minus what the week's issues already carried, one entry per event.
  */
-export async function dailyEdition(date: string, start: Date, end: Date): Promise<{ entries: EditionEntry[]; stats: Record<string, number> }> {
+export type DailyLogLink = { title: string; url: string };
+
+export function dailyLogLinks(rows: DailyLogLink[]): DailyLogLink[] {
+  return [...new Map(rows.map(({ title, url }) => [url, { title, url }])).values()];
+}
+
+export async function dailyEdition(date: string, start: Date, end: Date): Promise<{ entries: EditionEntry[]; stats: Record<string, number>; initial: DailyLogLink[]; supplements: DailyLogLink[] }> {
   const [memory, selected, missed, judged, hot, supplements] = await Promise.all([dailyMemory(date), periodReports(start, end), missedFacts(start, end), judgedReports(start, end), hotReports(start, end), moduleReports(start,end)]);
   // All paths join before history suppression; one fact keeps all paths and all candidate reports.
   const joined = new Map<string, { key: string; rows: ReportRow[]; selected: boolean; origins: string[] }>();
@@ -425,6 +431,8 @@ export async function dailyEdition(date: string, start: Date, end: Date): Promis
   entries.sort((a, b) => b.importance - a.importance || a.entry.itemId.localeCompare(b.entry.itemId));
   return {
     entries,
+    initial: dailyLogLinks(selected),
+    supplements: dailyLogLinks([...missed.flatMap(m => m.rows), ...hot.rows, ...supplements.rows]),
     stats: { judgedReports: judged, selectedReports: selected.length, hotEvents: hot.marks.size, facts: raw.length, repeatsSuppressed: raw.length - kept.length, fillIns: kept.filter((f) => !f.selected).length, events: entries.length },
   };
 }

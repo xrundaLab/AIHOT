@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { beijingDate } from "@aihot/contracts/time";
 import { SITE } from "@aihot/site";
 import { Link, useFetcher } from "react-router";
 import { useEffect } from "react";
@@ -23,6 +24,7 @@ const PARTS = await loadParts((m) => m.admin?.runs);
 
 export default function RunsAdmin({ loaderData }: Route.ComponentProps) {
   const refresh = useFetcher<typeof loader>();
+  const [dailyLogDate, setDailyLogDate] = useState(() => beijingDate(Date.now()));
   const r = refresh.data ?? loaderData;
   const { run, pending } = useAdminAction();
   const [receipt, setReceipt] = useState<AdminReceiptIssue | null>(null);
@@ -46,6 +48,14 @@ export default function RunsAdmin({ loaderData }: Route.ComponentProps) {
 
   return (
     <AdminPage title="运行" subtitle={<>任务、队列、信源延迟与需要人工核对的回执和投递。每 20 秒自动刷新 · 最近检查 {bj(r.checkedAt)}</>}>
+      <Card title="日报日志">
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="flex items-center gap-2">日报日期
+            <input type="date" value={dailyLogDate} onChange={e => setDailyLogDate(e.target.value)} />
+          </label>
+          {dailyLogDate && <a className="underline" href={`/api/admin/reports/daily/${dailyLogDate}/log`}>下载日报日志</a>}
+        </div>
+      </Card>
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-5">
         <Stat
           label="worker"
