@@ -193,8 +193,6 @@ export interface ServerModule {
   name: string;
   /** Sources whose selected articles keep independent cards/seats without changing admission or event identity (publication/rules.ts, scope.ts). */
   independentSelectedSources?: readonly string[];
-  /** Aggregated sources that cannot confer full-text permission for their members. */
-  summaryOnlySources?: readonly string[];
   /** Extra daily candidates in [start,end), consumed by reports/edition.ts before history suppression. */
   dailyCandidates?: (start: Date, end: Date) => Promise<DailySupplement[]>;
   /** Explicit site policy for listing undated material without making it selectable. */

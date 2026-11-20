@@ -13,7 +13,6 @@ import { screenRankings } from "./backend/screen.ts";
 export const rankingsServer = defineServerModule({
   name: "rankings",
   dailyCandidates: radarDailyCandidates,
-  summaryOnlySources: ["radar-discovery"],
   async listUndated(articleId, db) {
     const [row] = await db`SELECT 1 FROM articles a JOIN sources s ON s.id=a.source_id
       WHERE a.id=${articleId} AND a.source_id='radar-discovery' AND s.enabled AND s.participation_mode='editorial'

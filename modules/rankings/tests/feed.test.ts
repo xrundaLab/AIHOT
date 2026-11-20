@@ -4,6 +4,7 @@ import { sql } from "@aihot/backend/db";
 import { installModules } from "@aihot/backend/modules";
 import { bodyModeOf } from "@aihot/backend/publication/rules";
 import { publishArticle } from "@aihot/backend/publication/publish";
+import { loadItemDetail } from "@aihot/backend/publication/detail";
 import { loadPool } from "@aihot/backend/publication/pool";
 import { updateSource } from "@aihot/backend/admin/sources";
 import { stopBoss } from "@aihot/backend/jobs/queue";
@@ -14,7 +15,7 @@ after(async () => { installModules([]); await stopBoss(); await sql.end(); });
 
 test("radar filter, counts, search and public eligibility agree", async () => {
   installModules([rankingsServer]);
-  assert.equal(bodyModeOf({ id: 'radar-discovery', name: '热文雷达', kind: 'external', tier: 'EXCLUDE_MP', participation_mode: 'editorial', first_party: false, site_fulltext: true, syndicate_fulltext: true }, 'ok', true), 'summary');
+  assert.equal(bodyModeOf({ id: 'radar-discovery', name: '热文雷达', kind: 'external', tier: 'EXCLUDE_MP', participation_mode: 'editorial', first_party: false, site_fulltext: true, syndicate_fulltext: true }, 'ok', true), 'full');
   await sql`INSERT INTO sources(id,name,kind,participation_mode) VALUES ('feed-source','来源','rss','editorial')`;
   const add = async (id: string, visibility = 'public') => {
     await sql`INSERT INTO articles(id,source_id,identity_key,url,title,discovered_at,timeline_at) VALUES (${id},'feed-source',${id},${`https://example.org/${id}`},${id},now(),now())`;
@@ -44,6 +45,8 @@ test("radar filter, counts, search and public eligibility agree", async () => {
   assert.equal((await loadPool({ ...base, collection: 'unknown' })).total, 0);
 });
 
+
+
 test("isolated radar items are queued for analysis only when editorial publishing is enabled", async () => {
   await sql`INSERT INTO sources(id,name,kind,participation_mode,tier) VALUES ('radar-discovery','热文雷达','external','isolated','EXCLUDE_MP')`;
   await sql`INSERT INTO articles(id,source_id,identity_key,url,title,body_status,discovered_at,timeline_at,processing_state) VALUES ('radar-queue','radar-discovery','queue','https://example.org/q','标题','unconfirmed',now(),now(),'skipped')`;
@@ -66,4 +69,20 @@ test("isolated radar items are queued for analysis only when editorial publishin
   await publishArticle('radar-queue');
   const [archive] = await sql`SELECT eligible FROM publications WHERE article_id='radar-queue'`;
   assert.equal(archive!.eligible, false);
+});
+
+test('radar detail shows a confirmed body when site full text is enabled, even if analysis blocks it', async () => {
+  await sql`UPDATE sources SET site_fulltext=true WHERE id='radar-discovery'`;
+  await sql`INSERT INTO articles(id,source_id,identity_key,url,title,body_status,body_text,body_html,discovered_at,timeline_at,processing_state)
+    VALUES ('radar-full','radar-discovery','radar-full','https://example.org/full','文章标题','ok','这是完整正文。','<p>这是完整正文。</p>',now(),now(),'blocked')`;
+  await sql`INSERT INTO analyses(article_id,input_revision,origin,relevance) VALUES ('radar-full',1,'rule','block')`;
+  await publishArticle('radar-full');
+  let detail = await loadItemDetail('radar-full');
+  assert.equal(detail.kind, 'found');
+  if (detail.kind === 'found') assert.match(JSON.stringify(detail.item.body), /这是完整正文/);
+  await sql`UPDATE sources SET site_fulltext=false WHERE id='radar-discovery'`;
+  await publishArticle('radar-full');
+  detail = await loadItemDetail('radar-full');
+  assert.equal(detail.kind, 'found');
+  if (detail.kind === 'found') assert.equal(detail.item.body, null);
 });

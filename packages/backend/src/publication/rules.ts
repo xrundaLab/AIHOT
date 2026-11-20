@@ -60,8 +60,7 @@ export function isSelectable(eligible: boolean, judgedSelected: boolean | null, 
  * WeChat and paywalled content never get it just because it was fetchable (source flag false).
  */
 export function bodyModeOf(source: SourceFacts, bodyStatus: string, hasBody: boolean): "full" | "summary" {
-  const aggregated = serverModules().some(m => m.summaryOnlySources?.includes(source.id));
-  return !aggregated && source.site_fulltext && bodyStatus === "ok" && hasBody ? "full" : "summary";
+  return source.site_fulltext && bodyStatus === "ok" && hasBody ? "full" : "summary";
 }
 
 /** Full-RSS redistribution whitelist: only sources that explicitly allow it. */
