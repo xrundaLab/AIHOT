@@ -62,7 +62,7 @@ async function storyFor(id: string, role: "report" | "mention" = "report"): Prom
 const released = () => ({ releasedAt: new Date(Date.now() - 60_000) });
 async function get(url: string, headers: Record<string, string> = {}) {
   const res = await app.inject({ method: "GET", url, headers });
-  return { status: res.statusCode, body: res.body, etag: res.headers.etag as string | undefined };
+  return { status: res.statusCode, body: res.body, contentType: res.headers["content-type"], etag: res.headers.etag as string | undefined };
 }
 
 test("editor may list an undated archive in search without selecting it; the decision survives rebuild and can be cleared", async () => {
@@ -281,8 +281,15 @@ test("a withdrawn item leaves every report exit", async () => {
             ON CONFLICT (kind, key) DO UPDATE SET content = EXCLUDED.content`;
   assert.ok((await get(`/api/v1/dailies/${REPORT_KEY}`)).body.includes(`QUOTED-${T}`), "the report quotes the item before");
 
+  const markdownPath = `/api/v1/dailies/${REPORT_KEY}/markdown`;
+  const markdown = await get(markdownPath);
+  assert.equal(markdown.status, 200);
+  assert.match(String(markdown.contentType), /^text\/markdown/);
+  assert.match(markdown.body, new RegExp(`QUOTED-${T}`));
+  assert.equal(markdown.body, (await get(`/api/site/reports/daily/${REPORT_KEY}/markdown`)).body);
+
   await setVisibility(id, { visibility: "withdrawn", reason: "test", version: 0 }, "test");
-  const reports = [`/api/v1/dailies/${REPORT_KEY}`, `/api/site/reports/daily/${REPORT_KEY}`, `/api/v1/agent/daily/${REPORT_KEY}`, "/api/v1/agent/daily"];
+  const reports = [markdownPath, `/api/v1/dailies/${REPORT_KEY}`, `/api/site/reports/daily/${REPORT_KEY}`, `/api/v1/agent/daily/${REPORT_KEY}`, "/api/v1/agent/daily"];
   for (const url of reports) {
     const res = await get(url);
     assert.equal(res.status, 200, url);
