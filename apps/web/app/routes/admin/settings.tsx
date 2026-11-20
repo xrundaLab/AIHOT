@@ -10,12 +10,11 @@ import { toast } from "../../features/admin/toast";
 
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const [settings, prompt] = await Promise.all([
+  const [settings, ...prompts] = await Promise.all([
     adminGet<AdminSettings>(request, "/api/admin/settings"),
-    adminGet<PromptState>(request, "/api/admin/prompts/daily-review"),
+    ...promptNames.map(({ name }) => adminGet<PromptState>(request, `/api/admin/prompts/${name}`)),
   ]);
-  return { ...settings, prompt };
-
+  return { ...settings, prompts };
 }
 
 export const meta: Route.MetaFunction = () => [{ title: `设置 · ${SITE.name} 后台` }];
@@ -104,25 +103,31 @@ function TargetToggle({ t }: { t: AdminSettings["targets"][number] }) {
   );
 }
 
+const promptNames = [
+  { name: "daily-review", label: "日报适用性审核" },
+  { name: "prefilter", label: "相关性预筛" },
+  { name: "selection-score", label: "文章评分" },
+] as const;
+
 type PromptRevision = { text: string; at: string | null };
 type PromptState = { current: PromptRevision; history: PromptRevision[] };
 
-function DailyPromptSettings({ state }: { state: PromptState }) {
+function PromptSettings({ state, name, label }: { state: PromptState; name: string; label: string }) {
   const { run, pending } = useAdminAction();
   const [draft, setDraft] = useState<{ text: string; expected: string | null } | null>(null);
   const download = () => {
     const url = URL.createObjectURL(new Blob([state.current.text], { type: "text/markdown;charset=utf-8" }));
     const link = document.createElement("a");
     link.href = url;
-    link.download = "daily-review.md";
+    link.download = `${name}.md`;
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
   const preview = (text: string) => setDraft({ text, expected: state.current.at });
   return (
     <Card>
-      <h2>提示词管理</h2>
-      <p>日报适用性审核 · {state.current.at ? bj(state.current.at) : "随部署提供的版本"}</p>
+      <h3>{label}</h3>
+      <p>{state.current.at ? bj(state.current.at) : "随部署提供的版本"}</p>
       <Button onClick={download}>下载当前 Markdown</Button>
       <label>上传 Markdown
         <input type="file" accept=".md,.markdown" onChange={async e => {
@@ -143,7 +148,7 @@ function DailyPromptSettings({ state }: { state: PromptState }) {
         <details><summary>当前生效内容</summary><pre className="whitespace-pre-wrap">{state.current.text}</pre></details>
         <details open><summary>待发布内容</summary><pre className="whitespace-pre-wrap">{draft.text}</pre></details>
         <Button disabled={!!pending || draft.text === state.current.text} onClick={async () => {
-          if (await run("POST", "/api/admin/prompts/daily-review", draft, { success: "日报提示词已发布" })) setDraft(null);
+          if (await run("POST", `/api/admin/prompts/${name}`, draft, { success: `${label}提示词已发布` })) setDraft(null);
         }}>确认发布</Button>
         <Button onClick={() => setDraft(null)}>取消</Button>
       </div>}
@@ -154,7 +159,10 @@ function DailyPromptSettings({ state }: { state: PromptState }) {
 export default function SettingsAdmin({ loaderData: s }: Route.ComponentProps) {
   return (
     <AdminPage title="设置" subtitle="不改代码即可替换的运营设置。每次修改都写入审计记录。">
-      <DailyPromptSettings state={s.prompt} />
+      <section aria-label="提示词管理">
+        <h2>提示词管理</h2>
+        {promptNames.map((prompt, i) => <PromptSettings key={prompt.name} {...prompt} state={s.prompts[i]!} />)}
+      </section>
       <div className="grid gap-5 xl:grid-cols-2">
         <Card title="关于页二维码">
           <div className="space-y-5">

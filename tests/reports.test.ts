@@ -20,6 +20,20 @@ after(async () => {
   await closeDb();
 });
 
+test("publishing prefilter changes only its managed wording and retains the fallback", async () => {
+  const { managedPrompt, managedPromptForRun, publishManagedPrompt } = await import("@aihot/backend/reports/daily-prompt");
+  const before = await managedPrompt("prefilter");
+  const score = await managedPromptForRun("selection-score");
+  const prefilter = await managedPromptForRun("prefilter");
+  const published = await publishManagedPrompt("prefilter", before.current.text + "\n预筛独立发布测试。\n", before.current.at, "test");
+  const active = await managedPromptForRun("prefilter");
+  assert.match(active.system, /预筛独立发布测试/);
+  assert.notEqual(active.version, prefilter.version);
+  assert.deepEqual(await managedPromptForRun("selection-score"), score);
+  await publishManagedPrompt("prefilter", published.history[0]!.text, published.current.at, "test");
+  assert.deepEqual(await managedPromptForRun("prefilter"), prefilter);
+});
+
 test("a late run writes the issue that was due, not today's", () => {
   assert.equal(dueDaily(editionAt("daily", "2026-09-29", 6)), "2026-09-29");
   assert.equal(dueDaily(editionAt("daily", "2026-09-30", -60)), "2026-09-29", "the 29th's run delayed until just before the next issue");

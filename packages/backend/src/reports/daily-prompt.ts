@@ -3,28 +3,30 @@ import { sql } from "../db.ts";
 import { audit } from "../audit.ts";
 import { promptFromText, rawPrompt } from "../editorial/prompts.ts";
 
-const key = "prompts.daily-review";
-const name = "daily-review";
+export const MANAGED_PROMPTS = ["daily-review", "prefilter", "selection-score"] as const;
+export type ManagedPrompt = (typeof MANAGED_PROMPTS)[number];
 type Revision = { text: string; at: string | null };
 type State = { current: Revision; history: Revision[] };
 
-export async function dailyPrompt(): Promise<State> {
+export async function managedPrompt(name: ManagedPrompt): Promise<State> {
+  const key = `prompts.${name}`;
   const [row] = await sql<{ value: State }[]>`SELECT value FROM settings WHERE key=${key}`;
   return row?.value ?? { current: { text: rawPrompt(name), at: null }, history: [] };
 }
 
-export async function dailyPromptForRun() {
-  const { current } = await dailyPrompt();
+export async function managedPromptForRun(name: ManagedPrompt) {
+  const { current } = await managedPrompt(name);
   const system = promptFromText(name, current.text);
   const version = `${name}@${createHash("sha256").update(system).digest("hex").slice(0, 10)}`;
   return { system, version };
 }
 
-export async function publishDailyPrompt(text: unknown, expected: unknown, actor: string) {
+export async function publishManagedPrompt(name: ManagedPrompt, text: unknown, expected: unknown, actor: string) {
+  const key = `prompts.${name}`;
   if (typeof text !== "string" || Buffer.byteLength(text) > 64 * 1024 ||
       !/\{\{siteName\s*\}\}/.test(text) || !/\{\{>\s*family-context\s*\}\}/.test(text) ||
       [...text.matchAll(/\{\{([^{}]*)\}\}/g)].some(m => !/^(siteName\s*|>\s*family-context\s*)$/.test(m[1]!))) {
-    throw Object.assign(new Error("请上传不超过 64 KB 的日报提示词，并保留站名与家友综述引用。"), { statusCode: 400 });
+    throw Object.assign(new Error("请上传不超过 64 KB 的 Markdown 提示词，并保留站名与家友综述引用。"), { statusCode: 400 });
   }
   return sql.begin(async tx => {
     await tx`SELECT pg_advisory_xact_lock(hashtext(${key}))`;
@@ -38,3 +40,8 @@ export async function publishDailyPrompt(text: unknown, expected: unknown, actor
     return next;
   });
 }
+
+export const dailyPrompt = () => managedPrompt("daily-review");
+export const dailyPromptForRun = () => managedPromptForRun("daily-review");
+export const publishDailyPrompt = (text: unknown, expected: unknown, actor: string) =>
+  publishManagedPrompt("daily-review", text, expected, actor);
