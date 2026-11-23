@@ -1,5 +1,5 @@
 // Article body extraction: readable text from the article page, or "unconfirmed" — never a wrong body.
-// Jina Reader is the budgeted fallback for pages that only render in a browser.
+// Browser rendering is the fallback for pages that need JavaScript.
 import { Readability } from "@mozilla/readability";
 import type { parseHTML } from "linkedom";
 import { sql } from "../db.ts";
@@ -7,6 +7,7 @@ import { guardedFetch, languageHeaders } from "../lib/http-fetch.ts";
 import { assertPageContent, contentDocument, UnavailablePageError } from "../lib/page-content.ts";
 import { stripTags } from "../lib/text.ts";
 import { isVideoPageUrl } from "../lib/video-url.ts";
+import { renderArticle } from "./browser.ts";
 import { jinaRead } from "../providers/jina.ts";
 import { BudgetExceededError } from "../providers/receipts.ts";
 import { getArticle } from "../providers/socialdata.ts";
@@ -15,14 +16,14 @@ import type { SourceRow } from "../sources/types.ts";
 import { onlyXArticleLink, xArticleText } from "../sources/x.ts";
 import { sanitizeBody, trimTrailingChrome } from "./sanitize.ts";
 import { contentHash, fillPublicationTime, reviseMaterial, updatePresentation, type MediaItem } from "./materials.ts";
-import { markdownBody } from "./markdown.ts";
 import { pushedImageUrls, withPushedImages } from "./presentation.ts";
+import { markdownBody } from "./markdown.ts";
 
 export interface ExtractedBody {
   html: string;
   text: string;
   images: Array<{ kind: "image"; url: string; width: number | null; height: number | null }>;
-  via: "readability" | "jina";
+  via: "readability" | "browser" | "jina";
   /** The page's publication metadata; neither modification time nor dates mentioned in its prose. */
   publishedAt?: Date | null;
   publicationTime?: string | null;
@@ -433,15 +434,25 @@ export async function extractFromUrl(url: string, subject: string, rules: PageRu
     // fall through to Jina
   }
   if (opts.paidFallback === false) return null;
+  if (process.env.BROWSER_RENDER_ENABLED !== "true") {
+    try {
+      const page = await jinaRead(url, { purpose: "body_fallback", subject });
+      const html = markdownBody(page.markdown, url);
+      const text = stripTags(html);
+      return text.length < MIN_BODY_CHARS ? null : { html, text, images: [], via: "jina" };
+    } catch (error) {
+      if (error instanceof BudgetExceededError || error instanceof UnavailablePageError) return null;
+      throw error;
+    }
+  }
   try {
-    const page = await jinaRead(url, { purpose: "body_fallback", subject });
-    const html = markdownBody(page.markdown, url);
-    const text = stripTags(html);
-    if (text.length < MIN_BODY_CHARS) return null;
-    return { html, text, images: [], via: "jina" };
+    const page = await renderArticle(url, rules.acceptLanguage);
+    if (!page) return null;
+    const result = readable(page.html, page.url, rules);
+    return result ? { ...result, via: "browser" } : null;
   } catch (error) {
-    if (error instanceof BudgetExceededError || error instanceof UnavailablePageError) return null;
-    throw error;
+    console.error("article browser rendering failed", subject, error instanceof Error ? error.message : String(error));
+    return null;
   }
 }
 

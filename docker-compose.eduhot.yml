@@ -40,6 +40,9 @@ services:
   worker:
     <<: *backend
     command: ["node", "apps/worker/src/main.ts"]
+    environment:
+      <<: *backend-env
+      BROWSER_RENDER_ENABLED: "true"
     stop_grace_period: 515s
     depends_on:
       setup:

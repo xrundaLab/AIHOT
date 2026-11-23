@@ -305,3 +305,7 @@ cd apps/web && NODE_ENV=production node --env-file=../../.env server.ts   # 网�
 三个进程要一直运行，生产环境用 systemd 或 pm2 守护（守护配置里同样设 `NODE_ENV=production`）。停止 worker 时给它 515 秒（systemd 的 `TimeoutStopSec=515`、pm2 的 `kill_timeout: 515000` 和 `treekill: false`），覆盖队列的 470 秒排空和数据库清理；systemd 还需设 `KillMode=mixed`，只先通知主进程停止接任务，让正在备份的 `pg_dump`、`tar` 自然完成。被提前杀掉的调用结果不明，要等至少半小时自动放行后才会重试。
 
 开发时用带热更新的方式：`npm run dev:api`、`npm run dev:worker`、`npm run dev:web`。开发时想免登录进后台，在 `.env` 里设 `DEV_AUTH_ROLE=admin`（生产环境会拒绝启动）。
+
+### EduHOT 正文浏览器兜底
+
+EduHOT 的 worker 使用内部 Chromium 渲染 JavaScript 页面，直接抓取失败时再渲染并沿用正文清洗；仍失败的文章标记为正文未确认，后续可使用摘要。浏览器仅在 worker 启用，并发最多 2 个，页面请求经既有出站代理和地址检查。新增环境可设置 `BROWSER_RENDER_ENABLED=true`，并通过 `BROWSER_EXECUTABLE_PATH` 指定 Chromium 路径；未启用时保留原有 Jina 正文兜底。配置了 Jina URL 的信源列表和详情仍使用 Jina。浏览器渲染不会解决网站要求登录、验证码或拒绝服务器 IP 的情况。

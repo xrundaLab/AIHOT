@@ -40,6 +40,7 @@ const server = http.createServer((req, res) => {
     return void res.end(readerPages[req.url.split("/").at(-1)!] ?? readerPages.missing);
   }
   // The form itself is long enough to be mistaken for a body by the length and density checks.
+  if (req.url === "/dynamic") return void res.end(`<html><head><title>Dynamic article</title></head><body><article id="content"></article><script>document.querySelector('#content').innerHTML = '<h1>Dynamic article</h1><p>${prose}</p>'</script></body></html>`);
   if (req.url === "/article") return void res.end(html("Password autofill in browsers", autofill));
   if (req.url === "/login") return void res.end(signInPage);
   if (req.url === "/brand/register/") return void res.end(html("The certified products register", prose));
@@ -117,4 +118,15 @@ test("a listing's sign-in links are not articles", async () => {
   const source = { id: sourceId, config: { url: `${base}/listing`, parseMode: "html", itemSelector: "a[href]", linkSelector: "a[href]" } } as never;
   const candidates = await fetchWebList(source);
   assert.deepEqual(candidates.map((c) => c.url).sort(), [`${base}/article`]);
+});
+
+
+test("browser fallback renders JavaScript and keeps sign-in redirects out of article bodies", async () => {
+  process.env.BROWSER_RENDER_ENABLED = "true";
+  try {
+    const rendered = await extractFromUrl(`${base}/dynamic`, `article:${T}:dynamic`);
+    assert.equal(rendered?.via, "browser");
+    assert.ok(rendered?.text.includes("A real report explains"));
+    assert.equal(await extractFromUrl(`${base}/redirect`, `article:${T}:redirect`), null);
+  } finally { delete process.env.BROWSER_RENDER_ENABLED; }
 });
