@@ -44,3 +44,5 @@ report.lead同样返回itemId与状态字段；无文章可关联的安静日报
 ### 润思接入日报 Markdown
 
 `GET /api/v1/dailies/{date}/markdown` 按北京时间日报日期返回网页下载的同一份内容。无需登录，读取 UTF-8 Markdown 响应正文即可。缓存过期后可传 `If-None-Match`，未变化返回 304。无效日期返回 400，未出刊返回 404。
+
+本期排位在按栏目分组前保存。主条目从头条第 1 位开始，快讯接着编号。v1 日报 JSON 返回 `editionRank`，Markdown 显示「本期排位」。相关报道不单独排名，旧刊未记录时为 null／未知，撤稿后保留原排位。

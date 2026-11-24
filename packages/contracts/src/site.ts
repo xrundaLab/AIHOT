@@ -294,6 +294,8 @@ export function reportDateLabel(kind: ReportKind, key: string): string {
 }
 
 export interface DailyArticleStatus {
+  /** One-based issue position, main entries first and then flashes. Null if unavailable or unranked. */
+  editionRank?: number | null;
   /** Snapshot at composition time; null means the issue did not record this value. */
   selected: boolean | null;
   hot: boolean | null;

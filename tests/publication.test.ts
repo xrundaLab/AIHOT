@@ -273,7 +273,7 @@ test("a withdrawn item leaves every report exit", async () => {
   const id = await article();
   await publishArticle(id, released());
   const content = {
-    sections: [{ label: "模型", items: [{ itemId: id, title: `LEAD-${T}`, summary: `QUOTED-${T}`, sourceUrl: `https://example.com/original-${T}`, sourceName: "Test" }] }],
+    sections: [{ label: "模型", items: [{ itemId: id, editionRank: 4, title: `LEAD-${T}`, summary: `QUOTED-${T}`, sourceUrl: `https://example.com/original-${T}`, sourceName: "Test" }] }],
     flashes: [],
   };
   await sql`INSERT INTO reports (kind, key, window_start, window_end, content, generated_at, origin)
@@ -287,6 +287,10 @@ test("a withdrawn item leaves every report exit", async () => {
   assert.match(String(markdown.contentType), /^text\/markdown/);
   assert.match(markdown.body, new RegExp(`QUOTED-${T}`));
   assert.equal(markdown.body, (await get(`/api/site/reports/daily/${REPORT_KEY}/markdown`)).body);
+
+  const ranked = JSON.parse((await get(`/api/v1/dailies/${REPORT_KEY}`)).body);
+  assert.equal(ranked.report.sections[0].items[0].editionRank, 4);
+  assert.match((await get(`/api/v1/dailies/${REPORT_KEY}/markdown`)).body, /本期排位：4/);
 
   await setVisibility(id, { visibility: "withdrawn", reason: "test", version: 0 }, "test");
   const reports = [markdownPath, `/api/v1/dailies/${REPORT_KEY}`, `/api/site/reports/daily/${REPORT_KEY}`, `/api/v1/agent/daily/${REPORT_KEY}`, "/api/v1/agent/daily"];

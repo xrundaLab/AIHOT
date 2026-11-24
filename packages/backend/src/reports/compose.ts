@@ -112,6 +112,12 @@ async function composeDailyLocked(date: string, reason?: string, attemptTag?: st
   const links = (entries: EditionEntry[]) => dailyLogLinks(entries.flatMap(({ entry }) =>
     [entry, ...(entry.related ?? [])].map(article => ({ title: article.title, url: article.sourceUrl }))));
   const issue = arrangeDaily(review.entries);
+  const rankedMain = issue.main.map((item, index) => ({
+    ...item, entry: { ...item.entry, editionRank: index + 1 },
+  }));
+  const rankedFlashes = issue.flashes.map((item, index) => ({
+    ...item.entry, editionRank: rankedMain.length + index + 1,
+  }));
   const [lead, ...rest] = issue.main;
   const content = {
     date,
@@ -121,9 +127,9 @@ async function composeDailyLocked(date: string, reason?: string, attemptTag?: st
     leadItemId: lead?.entry.itemId ?? null,
     highlights: rest.slice(0, 3).map((e) => e.entry.itemId),
     sections: SECTION_ORDER
-      .map((label) => ({ label, items: issue.main.filter((e) => sectionOf(e.category) === label).map((e) => e.entry) }))
+      .map((label) => ({ label, items: rankedMain.filter((e) => sectionOf(e.category) === label).map((e) => e.entry) }))
       .filter((s) => s.items.length > 0),
-    flashes: issue.flashes.map((e) => e.entry),
+    flashes: rankedFlashes,
     metrics: dailyMetrics(issue.main),
     windowStart: start.toISOString(),
     windowEnd: end.toISOString(),

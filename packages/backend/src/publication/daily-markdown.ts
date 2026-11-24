@@ -37,6 +37,7 @@ export async function dailyMarkdown(date: string): Promise<string | null> {
       `- 精选：${state(status?.selected)}`,
       `- 热点：${state(status?.hot)}`,
       `- 热文雷达：${state(status?.fromRadar)}`,
+      `- 本期排位：${status?.editionRank ?? (depth > 3 ? "不单独排位" : "未知")}`,
       `- AI 评分：${status?.score ?? "未知"}`,
       `- 标签（当前文章）：${item?.tags.map(plain).join("、") || (item ? "无" : "未知")}`,
       `- 主题（当前文章）：${item?.topics.map(topic => `${plain(topic.name)} ${link(siteUrl(`/topics/${encodeURIComponent(topic.slug)}`))}`).join("、") || (item ? "无" : "未知")}`,
@@ -57,7 +58,12 @@ export async function dailyMarkdown(date: string): Promise<string | null> {
     `- 生成时间：${report.generatedAt}`,
     `- 日报链接：${link(dailyUrl(report.key))}`, "",
   ];
-  if (report.lead) lines.push("## 头条", "", plain(report.lead.title), "", plain(report.lead.leadParagraph), "");
+  if (report.lead) {
+    const lead = report.leadItemId && report.sections.flatMap(section => section.items).find(item => item.itemId === report.leadItemId);
+    lines.push("## 头条", "", plain(report.lead.title), "");
+    if (lead) lines.push(`- 本期排位：${lead.dailyStatus?.editionRank ?? "未知"}`, "");
+    lines.push(plain(report.lead.leadParagraph), "");
+  }
   for (const section of [...report.sections, { label: "快讯", summary: null, items: report.flashes }]) {
     if (!section.items.length) continue;
     lines.push(`## ${plain(section.label)}`, "");
