@@ -109,6 +109,31 @@ test("daily radar candidates use in-window completed A snapshots and public arti
     await sql`INSERT INTO reports(kind,key,window_start,window_end,content,generated_at)
       VALUES('daily','2026-11-23',${from},${from},${sql.json({sections:[{label:'news',items:[{itemId:'daily-radar-a'}]}]})},${from})`;
     assert.equal((await dailyEdition('2026-11-24',from,to)).entries.length,0,'previous daily removes the same article after all paths merge');
+    await sql`INSERT INTO sources(id,name,kind,participation_mode) VALUES ('radar-discovery','热文雷达','external','editorial')
+      ON CONFLICT(id) DO UPDATE SET participation_mode='editorial'`;
+    await sql`UPDATE articles SET source_id='radar-discovery' WHERE id='daily-radar-a'`;
+    await sql`UPDATE publications SET source_id='radar-discovery' WHERE article_id='daily-radar-a'`;
+    await sql`UPDATE radar_body_tasks SET origin='知乎热榜' WHERE article_id='daily-radar-a'`;
+    await sql`UPDATE reports SET content=${sql.json({ sections: [{ label: "资讯", items: [
+      { itemId: "daily-radar-a", title: "旧日报文章", sourceName: "热文雷达", fromRadar: true },
+      { itemId: "daily-radar-b", title: "已有信源", sourceName: "热文雷达", fromRadar: true },
+    ] }] })} WHERE kind='daily' AND key='2026-11-23'`;
+    const { v1Daily } = await import("@aihot/backend/publication/reports");
+    const { dailyMarkdown } = await import("@aihot/backend/publication/daily-markdown");
+    const output = await v1Daily("2026-11-23");
+    const cards = output?.report.sections[0]?.items;
+    assert.equal(cards?.[0]?.source.name, "知乎热榜");
+    assert.equal(cards?.[0]?.fromRadar, true);
+    assert.equal(cards?.[1]?.source.name, "radar article source");
+    const markdown = await dailyMarkdown("2026-11-23");
+    assert.match(markdown ?? "", /来源：知乎热榜/);
+    assert.match(markdown ?? "", /热文雷达：是/);
+    assert.doesNotMatch(markdown ?? "", /来源：热文雷达/);
+    await sql`UPDATE radar_body_tasks SET origin='' WHERE article_id='daily-radar-a'`;
+    assert.match(await dailyMarkdown("2026-11-23") ?? "", /来源：example\.org/);
+
+    await sql`UPDATE articles SET source_id='daily-radar-source' WHERE id='daily-radar-a'`;
+    await sql`UPDATE publications SET source_id='daily-radar-source' WHERE article_id='daily-radar-a'`;
   } finally { installModules(previous); }
   await article('daily-radar-legacy');
   await snapshot('daily-radar-legacy-board','legacy','2026-11-25T01:00:00Z',

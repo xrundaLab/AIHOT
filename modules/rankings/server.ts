@@ -24,8 +24,19 @@ export const rankingsServer = defineServerModule({
     filter(key) { return key === "radar" ? sql`AND EXISTS (SELECT 1 FROM radar_body_tasks rt WHERE rt.article_id=p.article_id)` : undefined; },
     async annotate(ids) {
       if (!ids.length) return {};
-      const rows = await sql<{ article_id: string; origin: string; source_id: string }[]>`SELECT t.article_id,t.origin,a.source_id FROM radar_body_tasks t JOIN articles a ON a.id=t.article_id WHERE t.article_id=ANY(${ids}::text[])`;
-      return Object.fromEntries(rows.map(r => [r.article_id, { badge: "热文雷达", ...(r.source_id === "radar-discovery" && r.origin ? { sourceName: `${r.origin}（榜单标注）` } : {}) }]));
+      const rows = await sql<{ article_id: string; origin: string; source_id: string; url: string }[]>`
+        SELECT DISTINCT ON (t.article_id) t.article_id,t.origin,a.source_id,a.url
+        FROM radar_body_tasks t JOIN articles a ON a.id=t.article_id
+        WHERE t.article_id=ANY(${ids}::text[])
+        ORDER BY t.article_id, (nullif(trim(t.origin), '') IS NULL), t.id`;
+      return Object.fromEntries(rows.map(r => {
+        if (r.source_id !== "radar-discovery") return [r.article_id, { badge: "热文雷达" }];
+        const origin = r.origin?.trim();
+        if (origin && origin !== "热文雷达") return [r.article_id, { badge: "热文雷达", sourceName: `${origin}（榜单标注）` }];
+        const url = URL.parse(r.url);
+        const host = url && ["https:", "http:"].includes(url.protocol) ? url.hostname : null;
+        return [r.article_id, { badge: "热文雷达", sourceName: host ?? "来源未标注" }];
+      }));
     },
   },
   http(app) {
