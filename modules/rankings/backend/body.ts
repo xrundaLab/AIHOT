@@ -123,21 +123,23 @@ export async function claimExternalTask() {
 }
 
 export class RadarTaskError extends Error { status: number; constructor(status: number, message: string) { super(message); this.status = status; } }
-export async function submitExternalBody(id: string, token: string, bodyText: string, images: string[] = []) {
-  if (!/^[1-9]\d{0,17}$/.test(id) || !token || !bodyText.trim() || bodyText.length > 1_000_000) throw new RadarTaskError(400, 'invalid task or body');
-  const text = bodyText.trim();
+export async function submitExternalBody(id: string, token: string, bodyText: string | undefined, images: string[] = [], bodyHtml?: string) {
+  if (!/^[1-9]\d{0,17}$/.test(id) || !token || (bodyHtml !== undefined ? !bodyHtml.trim() || bodyHtml.length > 4_000_000 : !bodyText?.trim() || bodyText.length > 1_000_000)) throw new RadarTaskError(400, 'invalid task or body');
   if (images.length > 6 || images.some(value => { try { const url = new URL(value); return value.length > 2048 || !['http:', 'https:'].includes(url.protocol); } catch { return true; } })) throw new RadarTaskError(400, 'invalid images');
   const imageUrls = [...new Set(images)];
-  const resultHash = createHash('sha256').update(JSON.stringify({ text, images: imageUrls })).digest('hex');
+  const resultHash = createHash('sha256').update(JSON.stringify(bodyHtml === undefined ? { text: bodyText!.trim(), images: imageUrls } : { html: bodyHtml.trim(), images: imageUrls })).digest('hex');
   await sql.begin(async tx => {
-    const [task] = await tx<{ article_id: string; leased_revision: number; state: string; lease_token: string; lease_until: Date; result_hash: string | null }[]>`SELECT article_id,leased_revision,state,lease_token,lease_until,result_hash FROM radar_body_tasks WHERE id=${id}::bigint FOR UPDATE`;
+    const [task] = await tx<{ article_id: string; url: string; leased_revision: number; state: string; lease_token: string; lease_until: Date; result_hash: string | null }[]>`SELECT article_id,url,leased_revision,state,lease_token,lease_until,result_hash FROM radar_body_tasks WHERE id=${id}::bigint FOR UPDATE`;
     if (task?.state === 'complete' && task.lease_token === token) {
       if (task.result_hash === resultHash) return;
     }
     if (!task || task.state !== 'leased' || task.lease_token !== token || !task.lease_until || task.lease_until.getTime() <= Date.now()) throw new RadarTaskError(409, 'task lease is invalid or expired');
     const [article] = await tx<{ revision: number; body_status: string; title: string; excerpt: string | null; media: Array<{ kind: string; url: string }> }[]>`SELECT revision,body_status,title,excerpt,media FROM articles WHERE id=${task.article_id} FOR UPDATE`;
     if (!article || article.revision !== task.leased_revision || article.body_status === 'ok') throw new RadarTaskError(409, 'article changed since claim');
-    const html = withPushedImages(textToHtml(text), imageUrls);
+    const cleanHtml = bodyHtml === undefined ? textToHtml(bodyText!.trim()) : sanitizeBody(bodyHtml, task.url);
+    const text = bodyHtml === undefined ? bodyText!.trim() : stripTags(cleanHtml).trim();
+    if (!text || text.length > 1_000_000) throw new RadarTaskError(400, 'invalid task or body');
+    const html = withPushedImages(cleanHtml, imageUrls);
     const media = [...article.media, ...imageUrls.filter(url => !article.media.some(m => m.kind === 'image' && m.url === url)).map(url => ({ kind: 'image', url }))];
     await reviseMaterial(tx, task.article_id, { set: sql`body_text=${text},body_html=${html},body_status='ok',media=${tx.json(media as never)}`, hash: contentHash({ title: article.title, bodyText: text, excerpt: article.excerpt }), title: article.title, bodyText: text });
     await queueProcessing(task.article_id, { db: tx });

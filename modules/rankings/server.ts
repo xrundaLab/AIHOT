@@ -109,10 +109,10 @@ export const rankingsServer = defineServerModule({
       reply.header("Cache-Control", "no-store");
       if (!authorized(req.headers.authorization)) return reply.code(401).send({ error: "unauthorized" });
       const { id } = req.params as { id: string };
-      const body = req.body as { leaseToken?: unknown; bodyText?: unknown; images?: unknown } | null;
-      if (typeof body?.leaseToken !== "string" || typeof body?.bodyText !== "string") return reply.code(400).send({ error: "leaseToken and bodyText required" });
+      const body = req.body as { leaseToken?: unknown; bodyText?: unknown; bodyHtml?: unknown; images?: unknown } | null;
+      if (typeof body?.leaseToken !== "string" || (body.bodyText !== undefined && typeof body.bodyText !== "string") || (body.bodyHtml !== undefined && typeof body.bodyHtml !== "string") || (body.bodyText === undefined && body.bodyHtml === undefined)) return reply.code(400).send({ error: "leaseToken and bodyText or bodyHtml required" });
       if (body.images !== undefined && (!Array.isArray(body.images) || body.images.some(image => typeof image !== "string"))) return reply.code(400).send({ error: "invalid images" });
-      try { await submitExternalBody(id, body.leaseToken, body.bodyText, body.images as string[] | undefined); return { ok: true }; }
+      try { await submitExternalBody(id, body.leaseToken, body.bodyText as string | undefined, body.images as string[] | undefined, body.bodyHtml as string | undefined); return { ok: true }; }
       catch (error) { if (error instanceof RadarTaskError) return reply.code(error.status).send({ error: error.message }); throw error; }
     });
   },

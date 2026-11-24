@@ -285,7 +285,7 @@ Content-Type: application/json
 
 - `GET /api/ingest/radar/tasks` 查看最多 100 条待外部处理、已领取和缺链接任务；返回只读列表，不改变状态。返回的 `nextCursor` 非空时，以 `?after=<nextCursor>` 获取下一页。
 - `POST /api/ingest/radar/tasks/claim` 原子领取一条任务，返回 `task`（没有任务时为 `null`）。其中 `id` 是字符串，`leaseToken` 是本次领取凭据，`leaseUntil` 是到期时间；30 分钟内未完成会重新开放领取。
-- `POST /api/ingest/radar/tasks/{id}/body` 回传 JSON：`{"leaseToken":"...","bodyText":"完整正文","images":["https://example.org/image.jpg"]}`。正文必填，最多 100 万字符；图片可省略，最多 6 个 HTTP(S) URL。相同领取凭据和相同内容的重试是幂等的；正文或图片不同、领取过期、文章在领取后已变更时返回 409，不覆盖已有内容。
+- `POST /api/ingest/radar/tasks/{id}/body` 回传 JSON，例如 `{"leaseToken":"...","bodyHtml":"<p>完整正文</p><img src=\"https://example.org/image.jpg\">"}`，也可继续使用 `{"leaseToken":"...","bodyText":"完整正文","images":["https://example.org/image.jpg"]}`。`bodyHtml` 和 `bodyText` 至少提供一个；同时提供时以 HTML 为准，服务端清洗 HTML 并从中提取正文，建议仅传正文片段。HTML 最多 400 万字符，提取后的正文或纯文本最多 100 万字符，且必须包含文字；整个请求体最多 4,100,000 字节。`images` 可省略，最多 6 个 HTTP(S) URL，与正文中已有图片去重。相同领取凭据和相同内容的重试是幂等的；正文或图片不同、领取过期、文章在领取后已变更时返回 409，不覆盖已有内容。
 - `POST /api/ingest/radar/tasks/{id}/failure` 回传 JSON：`{"leaseToken":"...","error":"抓取失败原因"}`，释放任务供重试。
 
 领取和回传均需 `Authorization: Bearer <INGEST_TOKEN>`。正文回填会保留原始信源和 URL，按文章版本记录更新并重新排入处理队列。该接口不会为未获授权的来源自动打开全文展示。
