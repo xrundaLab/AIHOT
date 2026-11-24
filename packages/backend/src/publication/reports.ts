@@ -2,6 +2,7 @@
 // listed; a missing date is a 404, never another day. Withdrawn citations are marked, not shown.
 import type { ReportCitation, ReportDetail, ReportIndexEntry, ReportNavigationEntry, ReportKind } from "@aihot/contracts/site";
 import { REPORTS, SITE, withSubject } from "@aihot/site";
+import { serverModules } from "../modules.ts";
 import { sql } from "../db.ts";
 import { cached, type Cached } from "../lib/cache.ts";
 import { proxiedImage, proxiedImageSet } from "../media/imgproxy.ts";
@@ -32,7 +33,7 @@ interface Availability {
   publishedAt: Date | null;
 }
 
-async function availability(ids: string[]): Promise<Map<string, Availability>> {
+async function availability(ids: string[], resolveSourceNames = false): Promise<Map<string, Availability>> {
   const out = new Map<string, Availability>();
   if (ids.length === 0) return out;
   const rows = await sql<{ id: string; available: boolean; summary: string | null; first_party: boolean; source_id: string; source_name: string | null; icon_url: string | null; at: Date | null }[]>`
@@ -40,13 +41,17 @@ async function availability(ids: string[]): Promise<Map<string, Availability>> {
       coalesce(p.published_at, p.discovered_at) AS at
     FROM publications p LEFT JOIN sources s ON s.id = p.source_id
     WHERE p.article_id IN ${sql(ids)}`;
+  const publicIds = resolveSourceNames ? rows.filter(r => r.available).map(r => r.id) : [];
+  const annotations = publicIds.length
+    ? Object.assign({}, ...(await Promise.all(serverModules().flatMap(m => m.pool?.annotate ? [m.pool.annotate(publicIds)] : []))))
+    : {};
   for (const r of rows) {
     out.set(r.id, {
       available: r.available,
       summary: r.summary,
       firstParty: r.first_party,
       sourceId: r.source_id,
-      sourceName: r.source_name,
+      sourceName: annotations[r.id]?.sourceName ? publicSourceName(annotations[r.id].sourceName) : r.source_name,
       sourceIcon: r.icon_url,
       publishedAt: r.at,
     });
@@ -355,7 +360,7 @@ export async function loadReport(kind: ReportKind, key: string, revision?: numbe
     ...(c.themes ?? []).flatMap((t: any) => t.storyRefs ?? []),
   ];
   const rawItems = [...entries, ...entries.flatMap((e) => e.related ?? [])];
-  const avail = await availability([...new Set(rawItems.map((i) => i.itemId).filter(Boolean))]);
+  const avail = await availability([...new Set(rawItems.map((i) => i.itemId).filter(Boolean))], kind === "daily");
   const cite = (raw: Record<string, any>) => {
     const citation = entryCitation(raw, avail);
     return kind === "daily" ? { ...citation, dailyStatus: dailyStatus(raw),
@@ -487,7 +492,7 @@ export async function dailyWithNotes(date: string | "latest") {
   if (!r) return null;
   const c = r.content;
   const raw = [...(c.sections ?? []).flatMap((s: any) => s.items ?? []), ...(c.flashes ?? [])];
-  const avail = await availability([...new Set([...raw, ...raw.flatMap((i: any) => i.related ?? [])].map((i: any) => i.itemId).filter(Boolean))] as string[]);
+  const avail = await availability([...new Set([...raw, ...raw.flatMap((i: any) => i.related ?? [])].map((i: any) => i.itemId).filter(Boolean))] as string[], true);
   const ok = (i: any) => !i.itemId || (avail.get(i.itemId)?.available ?? true);
   const metadata = (i: any) => citationMetadata(i, avail.get(i.itemId));
   const links = (i: any) => ({ aihot: i.itemId ? itemUrl(i.itemId) : null, original: metadata(i).sourceUrl });
