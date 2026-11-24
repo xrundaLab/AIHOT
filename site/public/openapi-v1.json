@@ -4510,6 +4510,11 @@
                     ],
                     "description": "Its event appeared on a published hot board in this edition window. Null means not recorded."
                   },
+                  "editionRank": {
+                    "type": ["integer", "null"],
+                    "minimum": 1,
+                    "description": "One-based position in the published daily, main entries followed by flashes. Related citations and older issues without a saved rank return null. Withdrawal can leave gaps."
+                  },
                   "fromRadar": {
                     "type": [
                       "boolean",
@@ -4600,6 +4605,11 @@
                         ],
                         "description": "Its event appeared on a published hot board in this edition window. Null means not recorded."
                       },
+                      "editionRank": {
+                        "type": ["integer", "null"],
+                        "minimum": 1,
+                        "description": "One-based position in the published daily, main entries followed by flashes. Related citations and older issues without a saved rank return null. Withdrawal can leave gaps."
+                      },
                       "fromRadar": {
                         "type": [
                           "boolean",
@@ -4685,6 +4695,11 @@
                   ],
                   "description": "Its event appeared on a published hot board in this edition window. Null means not recorded."
                 },
+                "editionRank": {
+                  "type": ["integer", "null"],
+                  "minimum": 1,
+                  "description": "One-based position in the published daily, main entries followed by flashes. Related citations and older issues without a saved rank return null. Withdrawal can leave gaps."
+                },
                 "fromRadar": {
                   "type": [
                     "boolean",
@@ -4735,6 +4750,11 @@
               "null"
             ],
             "description": "Its event appeared on a published hot board in this edition window. Null means not recorded."
+          },
+          "editionRank": {
+            "type": ["integer", "null"],
+            "minimum": 1,
+            "description": "One-based position in the published daily, main entries followed by flashes. Related citations and older issues without a saved rank return null. Withdrawal can leave gaps."
           },
           "fromRadar": {
             "type": [

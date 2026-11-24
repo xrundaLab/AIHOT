@@ -202,6 +202,7 @@ const stillPublic = (raw: Record<string, any>, avail: Map<string, Availability>)
 /** Stored article state, never today's selection or the event's ranking score. */
 function dailyStatus(raw: Record<string, any>) {
   return {
+    editionRank: Number.isSafeInteger(raw.editionRank) && raw.editionRank > 0 ? Number(raw.editionRank) : null,
     selected: typeof raw.selected === "boolean" ? raw.selected : null,
     hot: typeof raw.hot === "boolean" ? raw.hot : null,
     fromRadar: typeof raw.fromRadar === "boolean" ? raw.fromRadar : null,
