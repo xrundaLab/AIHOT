@@ -24,6 +24,27 @@ test('external task API requires authentication and validates input', async () =
   assert.equal((await app.inject({ method: 'POST', url: '/api/ingest/radar/tasks/1/body', headers, payload: { leaseToken: 'token', bodyHtml: 42 } })).statusCode, 400);
 });
 
+test('external tasks paginate in numeric ID order without duplicates or omissions', async () => {
+  const headers = { authorization: 'Bearer radar-api-token-123456789' };
+  await sql`INSERT INTO radar_body_tasks (id,title,state)
+    SELECT id, 'pagination test', (ARRAY['external','manual','leased'])[1 + (id % 3)]
+    FROM generate_series(950,1050) AS id`;
+  await sql`INSERT INTO radar_body_tasks (id,title,state) VALUES (1051,'excluded','pending'),(1052,'excluded','complete'),(1053,'excluded','running')`;
+  try {
+    const first = await app.inject({ url: '/api/ingest/radar/tasks', headers });
+    assert.equal(first.statusCode, 200);
+    const page = first.json();
+    assert.deepEqual(page.tasks.map((task: { id: string }) => task.id), Array.from({ length: 100 }, (_, i) => String(950 + i)));
+    assert.equal(page.nextCursor, '1049');
+    const second = await app.inject({ url: `/api/ingest/radar/tasks?after=${page.nextCursor}`, headers });
+    assert.equal(second.statusCode, 200);
+    assert.deepEqual(second.json().tasks.map((task: { id: string }) => task.id), ['1050']);
+    assert.equal(second.json().nextCursor, null);
+  } finally {
+    await sql`DELETE FROM radar_body_tasks WHERE id BETWEEN 950 AND 1053`;
+  }
+});
+
 test('external HTML is sanitized, preserved and safely retried', async () => {
   const headers = { authorization: 'Bearer radar-api-token-123456789' };
   await sql`INSERT INTO sources (id,name,kind,config,tier,participation_mode,interval_minutes,enabled,health,tags)

@@ -88,7 +88,7 @@ export const rankingsServer = defineServerModule({
       if (!authorized(req.headers.authorization)) return reply.code(401).send({ error: "unauthorized" });
       const after = (req.query as { after?: unknown }).after ?? "0";
       if (typeof after !== "string" || !/^(0|[1-9]\d{0,17})$/.test(after)) return reply.code(400).send({ error: "invalid cursor" });
-      const tasks = await sql`SELECT id::text,title,url,origin,state,error,updated_at AS "updatedAt" FROM radar_body_tasks WHERE state IN ('external','manual','leased') AND id > ${after}::bigint ORDER BY id LIMIT 100`;
+      const tasks = await sql`SELECT id::text,title,url,origin,state,error,updated_at AS "updatedAt" FROM radar_body_tasks WHERE state IN ('external','manual','leased') AND id > ${after}::bigint ORDER BY radar_body_tasks.id LIMIT 100`;
       return { tasks, nextCursor: tasks.length === 100 ? tasks.at(-1)!.id : null };
     });
     app.post("/api/ingest/radar/tasks/claim", async (req, reply) => {
